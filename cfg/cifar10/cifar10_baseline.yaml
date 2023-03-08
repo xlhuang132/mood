@@ -1,0 +1,34 @@
+
+
+OUTPUT_DIR: "outputs/"
+ 
+SHOW_STEP: 100
+SAVE_EPOCH: 10
+MAX_EPOCH: 300
+TRAIN_STEP: 500 
+ALGORITHM:
+  NAME: "Supervised"
+
+MODEL:
+  NAME: "Resnet34" 
+
+DATASET:
+  NAME: "cifar10"
+  ROOT: "./data/cifar10" 
+  NUM_CLASSES: 10
+  GROUP_SPLITS: [3,3,4]
+  NUM_WORKERS : 2 
+  IMB_TYPE: 'exp'
+  DL:
+    NUM_LABELED_HEAD: 1500
+    IMB_FACTOR_L: 100 
+  DU:
+    ID:
+      NUM_UNLABELED_HEAD: 3000 
+      IMB_FACTOR_UL: 100
+    OOD:
+      ENABLE: True
+      DATASET: 'TIN'
+      RATIO: 0.0 
+     
+ 
