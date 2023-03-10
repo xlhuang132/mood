@@ -1,4 +1,3 @@
-"""Reference: https://github.com/open-mmlab/mmdetection/blob/master/mmdet/models/losses/cross_entropy_loss.py"""  # noqa
 import torch
 import torch.nn as nn
 import torch.nn.functional as F

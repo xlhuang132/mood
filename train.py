@@ -12,7 +12,7 @@ def parse_args():
         "--cfg",
         help="decide which cfg to use",
         required=False,
-        default="cfg/baseline_cifar10.yaml",
+        default="cfg/supervised_cifar10.yaml",
         type=str,
     ) 
     
