@@ -27,6 +27,6 @@ DATASET:
     OOD:
       ENABLE: True
       DATASET: 'TIN'
-      RATIO: 0.0 
+      RATIO: 0.5
      
  
