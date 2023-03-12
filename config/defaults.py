@@ -4,7 +4,7 @@ _C = CN()
 
 # Model
 _C.MODEL = CN()
-_C.MODEL.NAME = "WRN"
+_C.MODEL.NAME = "Resnet34"
 _C.MODEL.WIDTH = 2
 _C.MODEL.NUM_CLASSES = 10
 _C.MODEL.EMA_DECAY = 0.999
