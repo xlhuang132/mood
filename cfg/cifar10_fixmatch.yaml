@@ -2,13 +2,11 @@
 
 OUTPUT_DIR: "outputs/" 
 SHOW_STEP: 100
-SAVE_EPOCH: 10
+SAVE_EPOCH: 1
 MAX_EPOCH: 300
 TRAIN_STEP: 500  
 ALGORITHM:
-  NAME: "FixMatch"
-  CONFIDENCE_THRESHOLD: 0.95  
-  
+  NAME: "FixMatch" 
 
 MODEL:
   NAME: "Resnet34" 
@@ -29,7 +27,7 @@ DATASET:
     OOD:
       ENABLE: True
       DATASET: 'TIN'  
-      RATIO: 0.5 
+      RATIO: 0.5
      
   
  

@@ -7,8 +7,7 @@ MAX_EPOCH: 300
 TRAIN_STEP: 500  
 
 ALGORITHM:
-  NAME: "MTCF"
-  CONFIDENCE_THRESHOLD: 0.95  
+  NAME: "MTCF" 
   PRE_TRAIN: 
     ENABLE: True
     WARMUP_EPOCH: 10
@@ -39,6 +38,6 @@ DATASET:
     OOD:
       ENABLE: True
       DATASET: 'TIN'
-      RATIO: 0.5 
+      RATIO: 0.5
     
    

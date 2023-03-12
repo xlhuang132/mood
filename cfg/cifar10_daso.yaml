@@ -6,8 +6,7 @@ SAVE_EPOCH: 10
 MAX_EPOCH: 300
 TRAIN_STEP: 500  
 ALGORITHM:
-  NAME: "DASO" 
-  CONFIDENCE_THRESHOLD: 0.95  
+  NAME: "DASO"  
   DASO:
     WITH_DIST_AWARE: True
     DIST_TEMP: 1.5
@@ -36,7 +35,7 @@ DATASET:
     OOD:
       ENABLE: True
       DATASET: 'TIN'
-      RATIO: 0.5  
+      RATIO: 0.5 
      
    
 

@@ -1,11 +1,7 @@
  
 import torch 
 from utils import Meters
-import torch.nn as nn 
-from config.defaults import update_config,_C as cfg
-import numpy as np 
-import models 
-import time  
+import torch.nn as nn   
 from models.feature_queue import FeatureQueue  
 import torch.nn.functional as F  
 from .base_trainer import BaseTrainer
@@ -21,7 +17,7 @@ class DASOTrainer(BaseTrainer):
         
         self.similarity_fn = nn.CosineSimilarity(dim=2) 
         self.dist_logger = DistributionLogger(
-                Meters(), num_classes=self.num_classes, is_ul_unknown=self.is_ul_unknown
+                Meters(), num_classes=self.num_classes, is_ul_unknown=True
             )        
         self.dist_logger.accumulate_pl = True
         class_count = self.get_label_dist()
@@ -67,13 +63,10 @@ class DASOTrainer(BaseTrainer):
         logger_dict = {"gt_labels": targets_x, "ul_labels": torch.full_like(ul_y, -1).cuda() }  # initial log
         # push memory queue
         num_labels = targets_x.size(0)
-        with torch.no_grad():
-            if self.ema_enable:
-                l_feats = self.ema_model(inputs_x, return_encoding=True) 
-            else:
-                
-                l_feats = self.model(inputs_x, return_encoding=True) 
-            self.queue.enqueue(l_feats.clone().detach(), targets_x.clone().detach())
+        with torch.no_grad(): 
+            l_feats = self.model(inputs_x, return_encoding=True) 
+            ll_feats=self.model(l_feats,return_projected_encoding=True)
+            self.queue.enqueue(ll_feats.clone().detach().cpu(), targets_x.clone().detach().cpu())
             
             
         # feature vectors
@@ -156,7 +149,7 @@ class DASOTrainer(BaseTrainer):
         self.optimizer.step() 
         
         if self.iter % self.cfg.SHOW_STEP==0:
-            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='.format(self.epoch,self.iter%self.val_iter if self.iter%self.val_iter>0 else self.val_iter,self.val_iter,self.losses.val,self.losses_x.avg,self.losses_u.val))
+            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='.format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses.val,self.losses_x.avg,self.losses_u.val))
         
         return now_result.cpu().numpy(), targets_x.cpu().numpy()
   

@@ -59,7 +59,7 @@ class MTCFTrainer(BaseTrainer):
         
         if self.iter % self.cfg.SHOW_STEP==0:
             self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='\
-                .format(self.epoch,self.iter%self.val_iter if self.iter%self.val_iter>0 else self.val_iter,self.val_iter,self.losses.val,self.losses_x.avg,self.losses_u.val))
+                .format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses.val,self.losses_x.avg,self.losses_u.val))
         return  
     
     def train_mtcf_step(self):
@@ -154,7 +154,7 @@ class MTCFTrainer(BaseTrainer):
         
         logits_u = torch.cat(logits[1:], dim=0)
 
-        Lx, Lu, w = self.l_criterion(logits_x, mixed_target[:targets_x.size(0)], logits_u, mixed_target[targets_x.size(0):], self.epoch+self.iter/self.val_iter)
+        Lx, Lu, w = self.l_criterion(logits_x, mixed_target[:targets_x.size(0)], logits_u, mixed_target[targets_x.size(0):], self.epoch+self.iter/self.train_per_step)
 
         loss = Ld + Lx + w * Lu 
         # record loss
@@ -167,7 +167,7 @@ class MTCFTrainer(BaseTrainer):
         loss.backward()
         self.optimizer.step()  
         if self.iter % self.cfg.SHOW_STEP==0:
-            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='.format(self.epoch,self.iter%self.val_iter if self.iter%self.val_iter>0 else self.val_iter,self.val_iter,self.losses.val,self.losses_x.avg,self.losses_u.val))
+            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='.format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses.val,self.losses_x.avg,self.losses_u.val))
         
         return now_result.cpu().numpy(), targets_x_old.cpu().numpy()
     

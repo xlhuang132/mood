@@ -6,14 +6,12 @@ SAVE_EPOCH: 10
 MAX_EPOCH: 300
 TRAIN_STEP: 500   
 ALGORITHM:
-  NAME: "MixMatch"
-  CONFIDENCE_THRESHOLD: 0.95  
-   
+  NAME: "MixMatch" 
+  
 MODEL:
   NAME: "Resnet34"  
   LOSS:
     LABELED_LOSS: "MixmatchLoss"  
-    WITH_LABELED_COST_SENSITIVE: False 
  
 DATASET:
   NAME: "cifar10"
@@ -26,10 +24,10 @@ DATASET:
     IMB_FACTOR_L: 100
   DU: 
     ID:
-      NUM_UNLABELED_HEAD:   3000 #
+      NUM_UNLABELED_HEAD:   3000  
       IMB_FACTOR_UL: 100
       REVERSE_UL_DISTRIBUTION: False
     OOD:
       ENABLE: True
       DATASET: 'TIN'
-      RATIO: 0.5  
+      RATIO: 0.5 

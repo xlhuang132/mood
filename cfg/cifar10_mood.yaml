@@ -7,8 +7,7 @@ SAVE_EPOCH: 10
 MAX_EPOCH: 300
 TRAIN_STEP: 500   
 ALGORITHM:
-  NAME: "MOOD"
-  CONFIDENCE_THRESHOLD: 0.95
+  NAME: "MOOD" 
   MOOD:
     NUM_AUG: 2
     TEMPERATURE: 0.5 # ?
@@ -27,11 +26,7 @@ ALGORITHM:
       K: 50  
     
 MODEL:
-  NAME:   "Resnet34"  
-  LOSS: 
-    FEATURE_LOSS:
-      TEMPERATURE: 0.5 
-      CENTER_DECAY_RATIO: 0.9
+  NAME:   "Resnet34"   
  
 DATASET:
   NAME: "cifar10"

@@ -106,10 +106,9 @@ def get_cifar10(root, out_dataset, start_label=0,ood_ratio=0,
                                         num_classes=num_classes,soft_domain=True,
                                         labeled_data_num=labeled_data_num,
                                         domain_labels=domain_labels,                            
-                                        )
-        return l_train, ul_train, train_dataset, cifar10_valid, cifar10_test
-     
-    train_dataset =CIFAR10Dataset(total_train,transforms=transform_train_ul,num_classes=num_classes)
+                                        ) 
+    else:
+        train_dataset =CIFAR10Dataset(total_train,transforms=transform_train_ul,num_classes=num_classes)
     transform_pre=build_simclr_transform(cfg)
     pre_train_dataset  =  CIFAR10Dataset(total_train,transforms=transform_pre,num_classes=num_classes)
     return l_train, ul_train, train_dataset, cifar10_valid, cifar10_test,pre_train_dataset

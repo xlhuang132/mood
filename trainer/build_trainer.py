@@ -1,5 +1,4 @@
-
-from .base_trainer import BaseTrainer
+ 
 from .daso_trainer import DASOTrainer
 from .mood_trainer import MOODTrainer
 from .fixmatch_trainer import FixMatchTrainer

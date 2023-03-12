@@ -1,24 +1,14 @@
 
  
-import torch 
-from utils import Meters
-import torch.nn as nn 
-from config.defaults import update_config,_C as cfg
-import numpy as np 
-import models 
-import time  
-import os   
-import datetime
+import torch   
+import numpy as np  
 import torch.nn.functional as F 
-
 from dataset.build_dataloader import _build_loader 
-
 from dataset.base import BaseNumpyDataset
 from .base_trainer import BaseTrainer
 import copy
 from loss.contrastive_loss import *
-from utils import FusionMatrix,AverageMeter
-from models.projector import  Projector 
+from utils import AverageMeter 
 
 def ova_loss(logits_open, label):
     logits_open = logits_open.view(logits_open.size(0), 2, -1)
@@ -96,7 +86,7 @@ class OpenMatchTrainer(BaseTrainer):
         inputs_all = torch.cat([inputs_all_w, inputs_all_s], 0)
         inputs = torch.cat([inputs_x, inputs_x_s,
                             inputs_all], 0).cuda()
-        targets_x = targets_x.cuda()
+        targets_x = targets_x.long().cuda()
         ## Feed data
         logits, logits_open = self.model(inputs)
         logits_open_u1, logits_open_u2 = logits_open[2*b_size:].chunk(2)
@@ -153,7 +143,7 @@ class OpenMatchTrainer(BaseTrainer):
         loss.backward()
         self.optimizer.step() 
         if self.iter % self.cfg.SHOW_STEP==0:
-            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='.format(self.epoch,self.iter%self.val_iter if self.iter%self.val_iter>0 else self.val_iter,self.val_iter,self.losses.avg,self.losses_x.avg,self.losses_u.avg))
+            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='.format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses.avg,self.losses_x.avg,self.losses_u.avg))
             self.logger.info('======= Avg_Lo:{:>5.4f} Avg_L_oem:{:>5.4f}  Avg_L_socr:{:>5.4f}  Avg_L_fix:{:>5.4f} ======='.format(self.losses_o.avg,self.losses_oem.avg,self.losses_socr.avg,self.losses_fix.avg))
          
         return now_result.cpu().numpy(), targets_x.repeat(2).cpu().numpy()

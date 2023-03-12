@@ -1,18 +1,10 @@
 
  
-import torch 
-from utils import Meters
-import torch.nn as nn 
-from config.defaults import update_config,_C as cfg
-import numpy as np 
-import models 
-import time  
-import os   
-import datetime
+import torch  
+import numpy as np  
 import torch.nn.functional as F  
 from .fixmatch_trainer import FixMatchTrainer
-from dataset.base import BaseNumpyDataset
-from utils import FusionMatrix 
+from dataset.base import BaseNumpyDataset 
 
 from dataset.build_dataloader import _build_loader
 
@@ -103,7 +95,7 @@ class CReSTTrainer(FixMatchTrainer):
         loss.backward()
         self.optimizer.step() 
         if self.iter % self.cfg.SHOW_STEP==0:
-            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='.format(self.epoch,self.iter%self.val_iter if self.iter%self.val_iter>0 else self.val_iter,self.val_iter,self.losses.val,self.losses_x.avg,self.losses_u.val))
+            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='.format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses.val,self.losses_x.avg,self.losses_u.val))
         
         return now_result.cpu().numpy(), targets_x.cpu().numpy()
 

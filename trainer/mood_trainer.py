@@ -1,19 +1,12 @@
 
-import logging 
-import torch 
-from utils import Meters
-import torch.nn as nn   
+ 
+import torch  
 import numpy as np 
-import pandas as pd
-import models 
-import time  
-import os   
-import datetime
+import pandas as pd 
+import os    
 import torch.nn.functional as F
 from utils.misc import AverageMeter  
-from .base_trainer import BaseTrainer
-from utils import FusionMatrix
-from models.projector import  Projector
+from .base_trainer import BaseTrainer 
 import math
 from loss.contrastive_loss import *
 from models.feature_queue import FeatureQueue

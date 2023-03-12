@@ -1,14 +1,10 @@
-import logging
-from operator import mod
-from tkinter import W
+  
 import torch 
 import numpy as np
 from dataset.build_dataloader import *
 from loss.build_loss import build_loss 
 import models 
-import time 
-import torch.optim as optim
-from models.feature_queue import FeatureQueue
+import time  
 import os   
 import datetime
 # import faiss

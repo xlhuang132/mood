@@ -1,13 +1,7 @@
 
 
-import torch  
-import torch.nn as nn 
-from config.defaults import update_config,_C as cfg
-import numpy as np 
-import models 
-import time  
-import os   
-import datetime
+import torch    
+import numpy as np  
 import torch.nn.functional as F  
 from .base_trainer import BaseTrainer
 from utils import interleave
@@ -38,7 +32,7 @@ class MixMatchTrainer(BaseTrainer):
         inputs_u=data[0][0]
         inputs_u2=data[0][1]
         
-        inputs_x, targets_x = inputs_x.cuda(), targets_x.cuda(non_blocking=True)        
+        inputs_x, targets_x = inputs_x.cuda(), targets_x.long().cuda(non_blocking=True)        
         inputs_u , inputs_u2= inputs_u.cuda(),inputs_u2.cuda()          
         x=torch.cat((inputs_x,inputs_u,inputs_u2),dim=0) 
         
@@ -53,7 +47,7 @@ class MixMatchTrainer(BaseTrainer):
             
         
         # mixup
-        bin_labels = F.one_hot(targets_x, num_classes=targets_u.size(1)).float()
+        bin_labels = F.one_hot(targets_x, num_classes=self.num_classes).float()
         all_inputs = torch.cat([inputs_x, inputs_u, inputs_u2], dim=0)
         all_targets = torch.cat([bin_labels, targets_u, targets_u], dim=0)
 
@@ -84,7 +78,7 @@ class MixMatchTrainer(BaseTrainer):
         logits_x = logits[0]
         logits_u = torch.cat(logits[1:], dim=0)
          
-        lx, lu, w = self.criterion(logits_x, mixed_target[:batch_size], logits_u, mixed_target[batch_size:], self.epoch+self.iter/self.val_iter)
+        lx, lu, w = self.criterion(logits_x, mixed_target[:batch_size], logits_u, mixed_target[batch_size:], self.epoch+self.iter/self.train_per_step)
         # compute 1st branch accuracy
         score_result = self.func(logits_x)
         now_result = torch.argmax(score_result, 1)         
@@ -101,6 +95,6 @@ class MixMatchTrainer(BaseTrainer):
         self.losses_x.update(lx.item(), inputs_x.size(0))
         self.losses_u.update(lu.item(), inputs_u.size(0)) 
         if self.iter % self.cfg.SHOW_STEP==0:
-            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='.format(self.epoch,self.iter%self.val_iter if self.iter%self.val_iter>0 else self.val_iter,self.val_iter,self.losses.val,self.losses_x.avg,self.losses_u.val))
+            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='.format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses.val,self.losses_x.avg,self.losses_u.val))
         
         return now_result.cpu().numpy(), targets_x.cpu().numpy()
