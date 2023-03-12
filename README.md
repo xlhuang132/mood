@@ -10,3 +10,7 @@
 - CIFAR-10
 - CIFAR-100
 - SVHN
+#### Usage
+Here is an example to run MOOD on CIFAR-10:
+
+`python train.py --cfg cfg/cifar10_mood.yaml`
