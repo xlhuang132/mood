@@ -10,7 +10,7 @@ import os
 import datetime
 import torch.nn.functional as F  
 from .base_trainer import BaseTrainer
-from utils import interleave,linear_rampup
+from utils import interleave
 from loss.build_loss import build_loss 
  
 class MixMatchTrainer(BaseTrainer):   

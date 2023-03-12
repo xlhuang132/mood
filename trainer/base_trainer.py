@@ -11,12 +11,11 @@ import torch.optim as optim
 from models.feature_queue import FeatureQueue
 import os   
 import datetime
-import faiss
+# import faiss
 from utils.utils import *
 import torch.nn.functional as F 
-from utils import AverageMeter, accuracy, create_logger,prepare_output_path
-from utils.build_optimizer import get_optimizer, get_scheduler
-from utils.utils import cal_metric,print_results
+from utils import AverageMeter, create_logger,prepare_output_path
+from utils.build_optimizer import get_optimizer, get_scheduler 
 from dataset.build_dataloader import _build_loader
 from dataset.base import BaseNumpyDataset
 from utils import FusionMatrix 
@@ -150,9 +149,6 @@ class BaseTrainer():
         self.optimizer.step()
         self.losses.update(loss.item(),inputs_x.size(0))
         
-        if self.ema_enable:
-            current_lr = self.optimizer.param_groups[0]["lr"]
-            ema_decay =self.ema_model.update(self.model, step=self.iter, current_lr=current_lr)
         if self.iter % self.cfg.SHOW_STEP==0:
             self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='\
                 .format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses.val,self.losses_x.avg,self.losses_u.val))
