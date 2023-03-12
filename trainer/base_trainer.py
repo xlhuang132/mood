@@ -7,7 +7,7 @@ import models
 import time  
 import os   
 import datetime
-# import faiss
+import faiss
 from utils.utils import *
 import torch.nn.functional as F 
 from utils import AverageMeter, create_logger,prepare_output_path
