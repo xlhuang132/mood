@@ -28,9 +28,7 @@ class MOODTrainer(BaseTrainer):
         self.feature_decay=0.9
         self.lambda_pap=cfg.ALGORITHM.MOOD.PAP_LOSS_WEIGHT
         self.feature_loss_temperature=cfg.ALGORITHM.MOOD.FEATURE_LOSS_TEMPERATURE
-        self.alpha = cfg.ALGORITHM.MOOD.MIXUP_ALPHA         
-        self.ood_detect_fusion = FusionMatrix(2)   
-        self.id_detect_fusion = FusionMatrix(2)         
+        self.alpha = cfg.ALGORITHM.MOOD.MIXUP_ALPHA       
         self.pap_loss_weight=cfg.ALGORITHM.MOOD.PAP_LOSS_WEIGHT
         self.loss_init()
         if self.cfg.RESUME !="":
@@ -204,13 +202,7 @@ class MOODTrainer(BaseTrainer):
             self._rebuild_models()
             self._rebuild_optimizer(self.model) 
             torch.cuda.empty_cache()
-        id_pre,id_rec=self.id_detect_fusion.get_pre_per_class()[1],self.id_detect_fusion.get_rec_per_class()[1]
-        ood_pre,ood_rec=self.ood_detect_fusion.get_pre_per_class()[1],self.ood_detect_fusion.get_rec_per_class()[1]
-        
-        if self.iter<self.warmup_iter:   
-            self.ood_detect_fusion.reset() 
-            self.id_detect_fusion.reset()
-            
+         
     def _rebuild_models(self):
         model = self.build_model(self.cfg) 
         self.model = model.cuda()    

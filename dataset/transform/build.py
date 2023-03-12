@@ -134,10 +134,6 @@ def build_transforms(cfg: CfgNode, dataset: str) -> tuple:
         is_train=False,
         resolution=resolution
     )
-    if algo_name == "DARP_ESTIM":
-        # for darp estimation stage, unlabeled images are used for 
-        # 'evaluating' the confusion matrix
-        ul_train = eval_aug
     if algo_name == "MOOD":
         l_train=ul_train
     return l_train, ul_train, eval_aug
