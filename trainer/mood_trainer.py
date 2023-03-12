@@ -176,20 +176,6 @@ class MOODTrainer(BaseTrainer):
         loss = - log_prob_pos.sum() / mask_same_c.sum()    
         return loss   
     
-    def get_id_feature_dist_loss(self,features, targets,id_mask):         
-        prototypes = self.queue.prototypes.cuda() 
-        pair_dist=-1  *torch.cdist(features,prototypes)  
-        logits=torch.div(pair_dist, self.feature_loss_temperature)  
-        mask_same_c=torch.eq(\
-            targets.contiguous().view(-1, 1).cuda(), \
-            torch.tensor([i for i in range(self.num_classes)]).contiguous().view(-1, 1).cuda().T).float()
-        id_mask=id_mask.expand(mask_same_c.size(1),-1).T  
-        mask_same_c*=id_mask
-        log_prob = logits - torch.log((torch.exp(logits) * (1 - mask_same_c)).sum(1, keepdim=True))
-        log_prob_pos = log_prob * mask_same_c  
-        loss = - log_prob_pos.sum() / mask_same_c.sum()    
-        return loss       
-     
     def mix_up(self,l_images,ul_images):                 
         with torch.no_grad():     
             len_l=l_images.size(0)

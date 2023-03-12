@@ -75,12 +75,7 @@ class BaseTrainer():
         self.warmup_temperature=self.cfg.ALGORITHM.PRE_TRAIN.SimCLR.TEMPERATURE
         self.warmup_iter=cfg.ALGORITHM.PRE_TRAIN.WARMUP_EPOCH*self.train_per_step 
         self.feature_dim=128  
-        self.k=cfg.ALGORITHM.PRE_TRAIN.OOD_DETECTOR.K    
-        self.ood_detect_fusion = FusionMatrix(2)   
-        self.id_detect_fusion = FusionMatrix(2)  
-        self.update_domain_y_iter=cfg.ALGORITHM.PRE_TRAIN.OOD_DETECTOR.DOMAIN_Y_UPDATE_ITER
-        self.ood_threshold=cfg.ALGORITHM.PRE_TRAIN.OOD_DETECTOR.OOD_THRESHOLD
-        self.id_threshold=cfg.ALGORITHM.PRE_TRAIN.OOD_DETECTOR.ID_THRESHOLD
+        self.k=cfg.ALGORITHM.PRE_TRAIN.OOD_DETECTOR.K     
         self.rebuild_unlabeled_dataset_enable=False        
         self.opearte_before_resume() 
         l_dataset = self.labeled_trainloader.dataset 
@@ -131,37 +126,6 @@ class BaseTrainer():
         self.pre_train_loader=dataloaders[5] # for OOD detector
         self.pre_train_iter=iter(self.pre_train_loader)  
         return  
-    
-    def train_warmup_step_by_dl_contra(self):
-        self.model.train()
-        loss =0
-        # DL  
-        try:
-            (inputs_x,inputs_x2), targets,_ = self.pre_train_iter.next()  
-        except:            
-            self.pre_train_iter=iter(self.pre_train_loader)            
-            (inputs_x,inputs_x2),targets,_ = self.pre_train_iter.next()  
-            
-        inputs_x, inputs_x2 = inputs_x.cuda(), inputs_x2.cuda()         
-        out_1 = self.model(inputs_x,return_encoding=True) 
-        out_2 = self.model(inputs_x2,return_encoding=True)  
-        out_1=self.model(out_1,return_projected_feature=True) 
-        out_2=self.model(out_2,return_projected_feature=True) 
-        similarity  = pairwise_similarity(out_1,out_2,temperature=self.warmup_temperature) 
-        mask= torch.eq(\
-            targets.contiguous().view(-1, 1).cuda(), \
-            targets.contiguous().view(-1, 1).cuda().T).float()
-        
-        loss        = SCL(similarity,mask) 
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        self.losses.update(loss.item(),inputs_x.size(0))
-        
-        if self.iter % self.cfg.SHOW_STEP==0:
-            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='\
-                .format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses.val,self.losses_x.avg,self.losses_u.val))
-        return 
     
     def train_warmup_step(self): #
         self.model.train() 
@@ -252,16 +216,6 @@ class BaseTrainer():
                  
         return
     
-    def build_data_loaders_for_dl_contra(self,)  :  
-        l_dataset = self.labeled_trainloader.dataset
-        l_data_np= l_dataset.select_dataset()
-        _,transform= self.pre_train_loader.dataset.select_dataset(return_transforms=True)
-        new_l_dataset = BaseNumpyDataset(l_data_np, transforms=transform,num_classes=self.num_classes)
-        new_loader = _build_loader(self.cfg, new_l_dataset,is_train=False)
-        self.pre_train_loader=new_loader
-        self.pre_train_iter=iter(self.pre_train_loader)
-        return  
-    
     def rebuild_unlabeled_dataset(self,selected_inds):
         ul_dataset = self.unlabeled_trainloader.dataset
         ul_data_np,ul_transform = ul_dataset.select_dataset(indices=selected_inds,return_transforms=True)
@@ -279,14 +233,12 @@ class BaseTrainer():
     
     def detect_ood(self):
         normalizer = lambda x: x / (np.linalg.norm(x, ord=2, axis=-1, keepdims=True) + 1e-10)        
-        l_feat,l_y=self.prepare_feat(self.test_labeled_trainloader)
+        l_feat=self.prepare_feat(self.test_labeled_trainloader)
         l_feat=normalizer(l_feat)
-        u_feat,u_y=self.prepare_feat(self.test_unlabeled_trainloader) 
+        u_feat=self.prepare_feat(self.test_unlabeled_trainloader) 
         u_feat=normalizer(u_feat)
-        du_gt=torch.zeros(self.ul_num) 
         id_mask=torch.zeros(self.ul_num).long().cuda()
         ood_mask=torch.zeros(self.ul_num).long().cuda()
-        du_gt=(u_y>=0).float().long().cuda() 
         index = faiss.IndexFlatL2(l_feat.shape[1])
         index.add(l_feat)
         D, _ = index.search(u_feat, self.k) 
@@ -301,8 +253,6 @@ class BaseTrainer():
         self.ood_masks=1-id_masks
         self.id_masks=self.id_masks.cuda()
         self.ood_masks=self.ood_masks.cuda()
-        self.id_detect_fusion.update(id_masks.numpy(),du_gt) 
-        self.ood_detect_fusion.update(ood_masks,1-du_gt)  
         if self.rebuild_unlabeled_dataset_enable and self.iter==self.warmup_iter:
             id_index=torch.nonzero(id_mask == 1, as_tuple=False).squeeze(1)
             id_index=id_index.cpu().numpy()
@@ -314,19 +264,7 @@ class BaseTrainer():
                 self.detect_ood()
             if self.iter==self.warmup_iter: 
                 self.save_checkpoint(file_name="warmup_model.pth")
-            id_pre,id_rec=self.id_detect_fusion.get_pre_per_class()[1],self.id_detect_fusion.get_rec_per_class()[1]
-            ood_pre,ood_rec=self.ood_detect_fusion.get_pre_per_class()[1],self.ood_detect_fusion.get_rec_per_class()[1]
-             
-            tpr=self.id_detect_fusion.get_TPR()
-            tnr=self.ood_detect_fusion.get_TPR()
-            self.logger.info("== ood_prec:{:>5.3f} id_prec:{:>5.3f} ood_rec:{:>5.3f} id_rec:{:>5.3f}".\
-                format(ood_pre*100,id_pre*100,ood_rec*100,id_rec*100))
-            self.logger.info("=== TPR : {:>5.2f}  TNR : {:>5.2f} ===".format(tpr*100,tnr*100))
-            self.logger.info('=='*40)    
-            
-            if self.iter<self.warmup_iter:   
-                self.ood_detect_fusion.reset() 
-                self.id_detect_fusion.reset()
+               
         else:
             self.logger.info("=="*30)
         pass
@@ -341,9 +279,6 @@ class BaseTrainer():
     def _rebuild_optimizer(self, model):
         self.optimizer = self.build_optimizer(self.cfg, model)
         torch.cuda.empty_cache()    
-    
-    def get_test_best(self):
-        return self.best_val_test
     
     def evaluate(self,return_group_acc=False,return_class_acc=False):  
         eval_model=self.get_val_model() 
@@ -517,7 +452,6 @@ class BaseTrainer():
         model=self.get_val_model().eval()
         n=dataloader.dataset.total_num
         feat=torch.zeros((n,self.feature_dim)) 
-        targets_y=torch.zeros(n).long()
         with torch.no_grad():
             for batch_idx,(inputs, targets, idx) in enumerate(dataloader):
                 if len(inputs)==2 or len(inputs)==3:
@@ -526,7 +460,6 @@ class BaseTrainer():
                 outputs=self.model(inputs,return_encoding=True)
                 outputs=self.model(outputs,return_projected_feature=True) 
                 feat[idx]=   outputs.cpu()  
-                targets_y[idx]=targets.cpu()  
-        return feat,targets_y
+        return feat
     
          
