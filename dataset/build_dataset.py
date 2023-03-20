@@ -1,5 +1,5 @@
-from .cifar10 import * 
-from .cifar100 import *
+from .cifar10 import *  
+from .cifar100 import * 
 from .svhn import *
 from .build_transform import build_transform
 from dataset.ood_dataset_map import ood_dataset_map
