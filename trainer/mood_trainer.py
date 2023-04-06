@@ -111,10 +111,10 @@ class MOODTrainer(BaseTrainer):
         all_features=torch.cat((l_feature,ul_feature_weak),dim=0)
         all_target=torch.cat((targets_x,pred_class),dim=0)
         confidenced_id_mask= torch.cat([torch.ones(l_feature.size(0)).cuda(),id_mask*loss_weight],dim=0).long() 
-        Lidfeat=  self.pap_loss_weight*self.get_id_feature_contrast_loss(all_features, all_target, confidenced_id_mask)
+        Lidfeat=  self.pap_loss_weight*self.get_id_feature_loss(all_features, all_target, confidenced_id_mask)
         Loodfeat=0.
         if ood_mask.sum()>0:        
-            Loodfeat=self.pap_loss_weight*self.get_ood_feature_contrast_loss(ul_feature_weak,ul_feature_strong,ood_mask) 
+            Loodfeat=self.pap_loss_weight*self.get_ood_feature_loss(ul_feature_weak,ul_feature_strong,ood_mask) 
         pap_loss=Lidfeat+Loodfeat    
         loss_dict.update({"pap_loss":pap_loss})  
         loss = sum(loss_dict.values())
@@ -134,7 +134,7 @@ class MOODTrainer(BaseTrainer):
         
         return now_result.cpu().numpy(), targets_x.cpu().numpy()  
    
-    def get_id_feature_contrast_loss(self,feature,targets,id_mask):
+    def get_id_feature_loss(self,feature,targets,id_mask):
         prototypes = self.queue.prototypes.cuda()
         outputs=torch.cat((feature,prototypes),dim=0)
         B   = outputs.shape[0]
@@ -151,7 +151,7 @@ class MOODTrainer(BaseTrainer):
         loss = - log_prob_pos.sum() / mask_same_c.sum()  
         return loss
     
-    def get_ood_feature_contrast_loss(self,features_u,features_u2,ood_mask): 
+    def get_ood_feature_loss(self,features_u,features_u2,ood_mask): 
         prototypes = self.queue.prototypes.cuda()
         features=torch.cat([features_u,features_u2],0) 
         all_features=torch.cat([features,prototypes],0)  
@@ -225,9 +225,7 @@ class MOODTrainer(BaseTrainer):
             
         state_dict = torch.load(resume)
         model_dict=self.model.state_dict() 
-        # 1. filter out unnecessary keys
         pretrained_dict = {k: v for k, v in state_dict["model"].items() if k in self.model.state_dict()}
-        # 2. overwrite entries in the existing state dict
         model_dict.update(pretrained_dict)
         self.model.load_state_dict(model_dict) 
         self.optimizer.load_state_dict(state_dict["optimizer"])   
