@@ -238,7 +238,7 @@ class BaseTrainer():
         D2, _ = index.search(l_feat, self.k)
         known=-D2[:,-1]   
         known.sort()
-        thresh = known[50]        
+        thresh = known[round(0.05*self.l_num)]        
         id_masks= (torch.tensor(novel)>=thresh).float()
         ood_masks=1-id_masks 
         self.id_masks= id_masks
