@@ -24,25 +24,7 @@ def build_contrastive_transforms(cfg=None):
             transforms.RandomCrop(32, padding=4),
             transforms.ToTensor(),])
     return TransformTwice(transform)
- 
-# def build_transforms(cfg,dataset="cifar10"): 
-#     if cfg.DATASET.NAME=="cifar10":
-#         mean=(0.4914, 0.4822, 0.4465)
-#         std= (0.2471, 0.2435, 0.2616)
-#     elif cfg.DATASET.NAME=="cifar100":
-#         mean=(0.5071, 0.4867, 0.4408)
-#         std=(0.2675, 0.2565, 0.2761)    
-#     transform_train = transforms.Compose([
-#         transforms.RandomCrop(32, padding=4),
-#         transforms.RandomHorizontalFlip(),
-#         transforms.ToTensor(),
-#     ])
-
-#     transform_val = transforms.Compose([
-#         transforms.Resize(32),
-#         transforms.ToTensor(),
-#     ])
-#     return transform_train,TransformTwice(transform_train),transform_val
+  
 
 def build_transforms(cfg: CfgNode, dataset: str) -> tuple:
     algo_name = cfg.ALGORITHM.NAME

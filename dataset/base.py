@@ -85,18 +85,7 @@ class BaseNumpyDataset(Dataset):
     # label-to-class quantity
     def _load_num_samples_per_class(self):
         labels = self.dataset[self.label_key]
-        classes = range(-1,self.num_classes)
-
-        # classwise_num_samples = dict()
-        # for i in classes:
-        #     if i==-1:
-        #         self.ood_num=len(np.where(labels == i)[0])
-        #         continue
-        #     classwise_num_samples[i] = len(np.where(labels == i)[0])
-
-        # # in a descending order of classwise count. [(class_idx, count), ...]
-        # res = sorted(classwise_num_samples.items(), key=(lambda x: x[1]), reverse=True)
-        # return res
+        classes = range(-1,self.num_classes) 
         classwise_num_samples = [0]*(len(classes)-1)
         for i in classes:
             if i==-1:

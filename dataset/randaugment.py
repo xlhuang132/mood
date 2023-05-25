@@ -12,30 +12,6 @@ logger = logging.getLogger(__name__)
 
 PARAMETER_MAX = 10
 
-
-    # the fixmatch_augment_pool includes:
-    #     AutoContrast
-    #     Brightness
-    #     Color
-    #     Contrast
-    #     Cutout
-    #     CutoutAbs
-    #     Equalize
-    #     Identity
-    #     Invert
-    #     Posterize
-    #     Rotate
-    #     Sharpness
-    #     ShearX
-    #     Solarize
-    #     SolarizeAdd
-    #     TranslateX
-    #     TranslateY
-    # RandAugmentMC(n,m)
-    #     choose n augmentation for the pool
-    #     and repeat m times
-
-
 def AutoContrast(img, **kwarg):
     return PIL.ImageOps.autocontrast(img)
 

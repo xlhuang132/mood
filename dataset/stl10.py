@@ -96,11 +96,7 @@ def get_stl10(root, out_dataset, start_label=0,ood_ratio=0,
         transform_pre=build_simclr_transform(cfg)
     pre_train_dataset  =  STL10Dataset(total_train,transforms=transform_pre,num_classes=num_classes)
     return l_train, ul_train, train_dataset, stl10_valid, stl10_test,pre_train_dataset
-    # else:
-        
-    #     train_dataset =STL10Dataset(total_train,transforms=transform_train_ul,num_classes=num_classes)
-    #     return l_train, ul_train, train_dataset, stl10_valid, stl10_test
-
+    
 
 class STL10Dataset(BaseNumpyDataset):
 
