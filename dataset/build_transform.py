@@ -1,5 +1,5 @@
 
-from .transforms import *
+from .transform import *
 import torchvision
 from .transform.rand_augment import RandAugment 
 from .transform.transforms import SimCLRAugmentation

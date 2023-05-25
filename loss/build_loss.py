@@ -1,6 +1,6 @@
 
 import torch.nn as nn  
-from .Semiloss import SemiLoss
+from .semiloss import SemiLoss
  
 
 import torch.nn as nn

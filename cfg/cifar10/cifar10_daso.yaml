@@ -57,7 +57,7 @@ DATASET:
       ENABLE: True
       DATASET: 'TIN'
       # RATIO: 0.0 # n(ood)/n(du)  
-      # INCLUDE_ALL: True  
+      INCLUDE_ALL: False  
      
    
 

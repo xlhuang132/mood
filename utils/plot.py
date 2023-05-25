@@ -17,8 +17,8 @@ import matplotlib
  
 plt.rcParams['font.family'] = 'DeJavu Serif'
 plt.rcParams['font.sans-serif'] = ['Helvetica']
-times_path='/home/aa/xlhuang/Openset-LT-SSL/utils/fonts/times.ttf'
-helvetica_path='/home/aa/xlhuang/Openset-LT-SSL/utils/fonts/Helvetica.ttf'
+times_path='utils/fonts/times.ttf'
+helvetica_path='utils/fonts/Helvetica.ttf'
 font_h = fm.FontProperties(fname=helvetica_path)
 font_t = fm.FontProperties(fname=times_path) 
 # plt.rcParams['text.usetex'] = True
