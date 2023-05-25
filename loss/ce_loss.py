@@ -1,3 +1,4 @@
+"""Reference: https://github.com/open-mmlab/mmdetection/blob/master/mmdet/models/losses/cross_entropy_loss.py"""  # noqa
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
@@ -165,7 +166,7 @@ class CrossEntropyLoss(nn.Module):
         """
         assert reduction_override in (None, 'none', 'mean', 'sum')
         reduction = (reduction_override if reduction_override else self.reduction)
-        if self.class_weight is not None: 
+        if self.class_weight is not None: # 类权重
             class_weight = self.class_weight
             if isinstance(class_weight, list):
                 class_weight = cls_score.new_tensor(class_weight)
@@ -182,5 +183,5 @@ class CrossEntropyLoss(nn.Module):
             reduction=reduction,
             avg_factor=avg_factor,
             **kwargs
-        )
+        )# 这一般是某个分类损失前的lambda
         return loss_cls

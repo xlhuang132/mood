@@ -1,0 +1,70 @@
+
+
+OUTPUT_DIR: "outputs/" 
+SHOW_STEP: 100
+SAVE_EPOCH: 10
+TRAIN_STEP: 500  
+MAX_EPOCH: 500
+ALGORITHM:
+  NAME: "MOOD"  
+  MOOD:
+    NUM_AUG: 2
+    MIXUP_ALPHA: 0.5  
+    ID_TEMPERATURE: 0.1
+    OOD_TEMPERATURE: 0.007
+    PAP_LOSS_WEIGHT: 0.2
+    WARMUP_EPOCH: 5
+  ABLATION: 
+    ENABLE: False
+    MOOD:
+      DUAL_BRANCH: False
+      MIXUP: False     
+      OOD_DETECTION: False 
+      PAP_LOSS: False
+
+  PRE_TRAIN: 
+    ENABLE: False
+    WARMUP_EPOCH: 500
+    SimCLR: 
+      ENABLE: True
+      TEMPERATURE: 0.1
+  OOD_DETECTOR:
+    TEMPERATURE: 0.5 
+    THRESH_PERCENT: 0.1
+    K: 50  
+
+  
+
+MODEL:
+  NAME:   "WRN_28_2"  
+  QUEUE:
+    FEAT_DIM: 64  
+    MAX_SIZE: 256
+ 
+DATASET:
+  NAME: "cifar10"
+  ROOT: "./data/cifar10" 
+  NUM_VALID: 5000
+  NUM_CLASSES: 10
+  GROUP_SPLITS: [3,3,4]
+  IFS: [100]
+  OODRS: [0.25]  
+  DOMAIN_DATASET_RETURN_INDEX: True
+  UNLABELED_DATASET_RETURN_INDEX: True
+  LABELED_DATASET_RETURN_INDEX: True 
+  DL:
+    NUM_LABELED_HEAD: 500 
+  DU:
+    ID:
+      NUM_UNLABELED_HEAD: 4000 
+    OOD:
+      ENABLE: True
+      DATASET: 'TIN' 
+  
+  DUAL_SAMPLER:
+    ENABLE: True
+    NAME: "ClassReversedSampler"  
+  
+  TRANSFORM:
+    UNLABELED_STRONG_AUG: True
+    LABELED_STRONG_AUG: False 

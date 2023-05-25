@@ -1,0 +1,43 @@
+
+
+OUTPUT_DIR: "outputs/" 
+
+SHOW_STEP: 100
+SAVE_EPOCH: 10
+MAX_EPOCH: 500
+TRAIN_STEP: 500 # 
+ALGORITHM:
+  NAME: "OODDetect"   
+   
+  OOD_DETECTOR:
+    TEMPERATURE: 0.5 
+    THRESH_PERCENT: 0.9
+    K: 50 
+    
+MODEL:
+  NAME: "WRN_28_2"     
+ 
+DATASET:
+  NAME: "svhn"
+  ROOT: "./data/svhn" 
+  NUM_CLASSES: 10
+  GROUP_SPLITS: [3,3,4]
+  IFS: [100]
+  OODRS: [0.0]  
+  DOMAIN_DATASET_RETURN_INDEX: True
+  UNLABELED_DATASET_RETURN_INDEX: True
+  LABELED_DATASET_RETURN_INDEX: True 
+  DL:
+    NUM_LABELED_HEAD: 150
+    # IMB_FACTOR_L: 100
+  DU:
+    ID:
+      NUM_UNLABELED_HEAD: 4500
+      # IMB_FACTOR_UL: 100
+    OOD:
+      ENABLE: True
+      DATASET: 'TIN'
+      RATIO: 0.0   
+      INCLUDE_ALL: True  
+
+# RESUME: '/home/aa/xlhuang/Openset-LT-SSL/outputs/cifar10/OODDetect/WRN_28_2/DL-1500-IF-100-DU3000-IF_U-100/OOD-TIN-all/models/checkpoint.pth'

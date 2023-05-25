@@ -1,6 +1,6 @@
 
 import torch.nn as nn  
-from .semi_loss import SemiLoss
+from .Semiloss import SemiLoss
  
 
 import torch.nn as nn
@@ -21,7 +21,8 @@ def build_loss(
         elif cfg.MODEL.LOSS.LABELED_LOSS =="SemiLoss": 
             criterion=SemiLoss()
         else:
-            criterion=nn.CrossEntropyLoss() 
+            criterion=nn.CrossEntropyLoss()
+            # raise "Labeled loss is not valid!"
         
         val_criterion=nn.CrossEntropyLoss()
         return criterion,val_criterion

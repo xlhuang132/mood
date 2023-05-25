@@ -1,6 +1,9 @@
 
 from tokenize import group
+
+
 import numpy as np
+ 
 from matplotlib import pyplot as plt
 
 class FusionMatrix(object):
@@ -13,7 +16,7 @@ class FusionMatrix(object):
 
     def update(self, output, label):
         length = output.shape[0]
-        for i in range(length): 
+        for i in range(length): # precision (1,1)TP/(TP(1,1)+FP(1,0)) recall TP(1,1)/TP(1,1)+FN(0,1)
             self.matrix[int(output[i]), int(label[i])] += 1
 
     def get_rec_per_class(self):
@@ -36,19 +39,28 @@ class FusionMatrix(object):
         pre[np.isnan(pre)] = 0
         return pre
     
-    def get_acc_per_class(self): 
+    def get_acc_per_class(self):# [output,target]
         acc = np.array(
             [self.matrix[i, i]/self.matrix[:,i].sum() for i in range(self.num_classes)]
         )
-        acc[np.isnan(acc)] = 0
+        acc[np.isnan(acc)] = 0 
+        acc=np.around(acc,4) 
         return acc
+     
+    def get_TNR(self): 
+        tnr=self.matrix[0,0]/(self.matrix[0,0]+self.matrix[1,0]) 
+        return tnr if not np.isnan(tnr) else 0
+    
+    def get_TPR(self): 
+        tpr=self.matrix[1,1]/(self.matrix[1,1]+self.matrix[0,1])        
+        return tpr if not np.isnan(tpr) else 0
 
     def get_accuracy(self):
         acc = (
             np.sum([self.matrix[i, i] for i in range(self.num_classes)])
             / self.matrix.sum()
-        )
-        return acc
+        ) 
+        return acc if not np.isnan(acc) else 0
 
     def plot_per_acc(self,save_path):
         acc=self.get_acc_per_class()
@@ -70,14 +82,14 @@ class FusionMatrix(object):
         assert len(acc)==len(tick_label)
         fig, ax = plt.subplots(figsize=(10,10))
         bars1 =plt.bar(range(len(acc)), acc,tick_label=tick_label)
-        for b in bars1:  
+        for b in bars1: #遍历每个柱子
             height = b.get_height()
             ax.annotate('{}'.format(height),
-                     
+                    #xy控制的是，标注哪个点，x=x坐标+width/2, y=height，即柱子上平面的中间
                     xy=(b.get_x() + b.get_width() / 2, height), 
-                    xytext=(0,3), 
-                    textcoords="offset points",  
-                    va = 'bottom', ha = 'center',  
+                    xytext=(0,3), #文本放置的位置，如果有textcoords，则表示是针对xy位置的偏移，否则是图中的固定位置
+                    textcoords="offset points", #两个选项 'offset pixels'，'offset pixels'
+                    va = 'bottom', ha = 'center', #代表verticalalignment 和horizontalalignment，控制水平对齐和垂直对齐。
                     weight='heavy',
                     ) 
         plt.show()
@@ -132,3 +144,95 @@ class FusionMatrix(object):
         fig.tight_layout()
         return fig
 
+class OODDetectFusionMatrix(object):
+    def __init__(self, num_classes):
+        self.num_classes = num_classes + 1
+        self.reset() 
+
+    def reset(self):
+        self.matrix = np.zeros((2,self.num_classes), dtype=int)
+
+    def update(self, output, label):
+        length = output.shape[0]
+        for i in range(length): # precision (1,1)TP/(TP(1,1)+FP(1,0)) recall TP(1,1)/TP(1,1)+FN(0,1)
+            self.matrix[int(output[i]), int(label[i])] += 1
+
+    def get_rec_per_class(self):
+        rec = np.array( # 多少被分为ID数据
+            [
+                self.matrix[1,i] / self.matrix[:,i].sum()
+                for i in range(self.num_classes)
+            ]
+        )
+        rec[np.isnan(rec)] = 0
+        return rec
+    
+    def get_acc_per_class(self):# [output,target]
+        acc = np.array(
+            [self.matrix[1, i]/self.matrix[:,i].sum() for i in range(self.num_classes)]
+        )
+        acc[np.isnan(acc)] = 0
+        return acc
+     
+    def get_TNR(self): # 多少被正确分为OOD 
+        tnr=self.matrix[0,-1]/sum(self.matrix[0]) 
+        return tnr if not np.isnan(tnr) else 0
+    
+    def get_TPR(self): 
+        tpr=sum(self.matrix[1,:-1])/sum(self.matrix[1,:])        
+        return tpr if not np.isnan(tpr) else 0
+
+    def get_FNR_per_class(self): # 多少被正确分为OOD 
+        fnr=np.array([self.matrix[0,i]/(self.matrix[0,i]+self.matrix[1,i]) for i in range(self.num_classes-1)])              
+        fnr[np.isnan(fnr)] = 0
+        return fnr
+              
+    
+    def get_TPR_per_class(self): 
+        tpr= np.array([self.matrix[1,i]/(self.matrix[0,i]+self.matrix[1,i]) for i in range(self.num_classes-1)])         
+        tpr[np.isnan(tpr)] = 0
+        return tpr
+    
+    def get_group_splits(self,splits=[3,3,4]):
+        
+        group_splits=[]
+        if splits!=[]:
+            assert sum(splits)==self.num_classes
+            num_ids=[i for i in range(self.num_classes)]
+            c=0
+            for i in splits:
+                group_splits.append(num_ids[c:c+i])
+                c+=i
+        return group_splits
+             
+    def get_group_tpr(self,split=[3,3,4]):
+        tprs=self.get_TPR_per_class()
+        group_splits=self.get_group_splits(split)
+        group_tprs=[np.mean(tprs[idxs]) for idxs in group_splits]
+        return group_tprs
+    
+    def plot_group_fnr(self,save_path,split=[3,3,4]):
+        tnrs=self.get_FNR_per_class(split=split)
+        group_tnrs=[np.mean(tprs[idxs]) for idxs in group_splits] 
+        return group_acc
+        
+    def plot_ood_detect_confusion_bar(self, tprs=None,fnrs=None,labels=None,save_path=''):
+        assert len(fnrs)==len(tprs) and len(fnrs)>0
+        x = np.arange(len(tprs))  # x轴刻度标签位置
+        width = 0.25  # 柱子的宽度
+        # 计算每个柱子在x轴上的位置，保证x轴刻度标签居中
+        # x - width/2，x + width/2即每组数据在x轴上的位置
+        plt.bar(x - width/2, tprs, width, label='TPR')
+        plt.bar(x + width/2, fnrs, width, label='FNR')
+        # plt.ylabel('Scores')
+        # plt.title( )
+        # x轴刻度标签位置不进行计算
+        plt.xticks(x, labels=labels)
+        plt.legend() 
+        
+        if save_path!='': 
+            plt.savefig(save_path, bbox_inches='tight')
+        plt.close()
+    
+
+        

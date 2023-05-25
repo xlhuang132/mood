@@ -1,7 +1,11 @@
+"""Reference: https://github.com/open-mmlab/mmdetection/blob/master/mmdet/models/losses/utils.py"""  # noqa
 import functools
+
 import torch.nn.functional as F
 from torch import Tensor
+
 from typing import Callable, Optional
+
 
 def reduce_loss(loss: Tensor, reduction: str) :
     """Reduce loss as specified.

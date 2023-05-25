@@ -1,87 +1,132 @@
-  
+   
+import logging
+from operator import mod
+from tkinter import W
 import torch 
 import numpy as np
 from dataset.build_dataloader import *
 from loss.build_loss import build_loss 
 import models 
-import time  
+import sklearn
+import time 
+import torch.optim as optim
+from models.feature_queue import FeatureQueue
 import os   
 import datetime
 import faiss
 from utils.utils import *
-import torch.nn.functional as F 
-from utils import AverageMeter, create_logger,prepare_output_path
-from utils.build_optimizer import get_optimizer, get_scheduler 
+import torch.nn.functional as F
+from utils.plot import plot_pr
+from utils import AverageMeter, accuracy, create_logger,\
+    plot_group_acc_over_epoch,prepare_output_path,plot_loss_over_epoch,plot_acc_over_epoch
+from utils.build_optimizer import get_optimizer, get_scheduler
+from utils.utils import cal_metric,print_results
 from dataset.build_dataloader import _build_loader
 from dataset.base import BaseNumpyDataset
-from utils import FusionMatrix 
+from utils import FusionMatrix
+from utils.ema_model import EMAModel
+from loss.soft_supconloss import SoftSupConLoss
 from loss.contrastive_loss import * 
-from models.projector import  Projector  
+from models.projector import  Projector 
+
+from utils import OODDetectFusionMatrix
+
+def cosine_similarity(x1, x2, eps=1e-12):
+    w1 = x1.norm(p=2, dim=1, keepdim=True)
+    w2 = x2.norm(p=2, dim=1, keepdim=True)
+    return torch.mm(x1, x2.t()) / (w1 * w2.t()).clamp(min=eps)
+
 
 class BaseTrainer():
-    def __init__(self,cfg): 
+    def __init__(self,cfg):
+        self.local_rank=cfg.LOCAL_RANK
         self.cfg=cfg
-        # prepare logger
         self.logger, _ = self.create_logger(cfg)        
         self.path,self.model_dir,self.pic_dir =self.prepare_output_path(cfg,self.logger)
-        
-        # =================== build model ============= 
-        self.model = models.__dict__[cfg.MODEL.NAME](cfg) 
-        self.model=self.model.cuda() 
+        self.num_classes=cfg.DATASET.NUM_CLASSES
+        self.batch_size=cfg.DATASET.BATCH_SIZE
+        # =================== build model =============
+        self.ema_enable=False
+        self.model = models.__dict__[cfg.MODEL.NAME](cfg=cfg)
+        self.ema_model = EMAModel(
+            self.model,
+            cfg.MODEL.EMA_DECAY,
+            cfg.MODEL.EMA_WEIGHT_DECAY, 
+        )
+        self.model=self.model.cuda()
+        # self.ema_model=self.ema_model.cuda()
         # =================== build dataloader =============
         self.ul_test_loader=None
         self.build_data_loaders()
         # =================== build criterion ==============
         self.build_loss()
         # ========== build optimizer ===========         
-        self.optimizer = get_optimizer(cfg, self.model) 
-        self.num_classes=cfg.DATASET.NUM_CLASSES
-        self.batch_size=cfg.DATASET.BATCH_SIZE
+        self.optimizer = get_optimizer(cfg, self.model)
+        
+        # ========== build dataloader ==========     
+        
         self.max_epoch=cfg.MAX_EPOCH 
-        self.train_per_step=cfg.TRAIN_STEP        
+        self.train_per_step=cfg.TRAIN_STEP       
+        # self.val_step=cfg.VAL_ITERATION
         self.max_iter=self.max_epoch*self.train_per_step+1
-        self.func = torch.nn.Softmax(dim=1)  
+        self.func = torch.nn.Softmax(dim=1) 
+        
         # ========== accuracy history =========
         self.test_accs=[]
         self.val_accs=[]
         self.train_accs=[]
         self.test_group_accs=[]
         self.val_group_accs=[]
-        self.train_group_accs=[] 
+        self.train_group_accs=[]
+        self.valset_enable=cfg.DATASET.NUM_VALID!=0
         # ========== loss history =========
         self.train_losses=[]
         self.val_losses=[]
-        self.test_losses=[] 
-        self.conf_thres=cfg.ALGORITHM.CONFIDENCE_THRESHOLD    
+        self.test_losses=[]
+        self.conf_thres=cfg.ALGORITHM.CONFIDENCE_THRESHOLD   
+        self.ood_detect_confusion_matrix=OODDetectFusionMatrix(self.num_classes)
         self.iter=0
         self.best_val=0
         self.best_val_iter=0
         self.best_val_test=0
         self.start_iter=1
         self.epoch=1
-        self.save_epoch=cfg.SAVE_EPOCH 
+        self.save_epoch=cfg.SAVE_EPOCH
+        
         # === pretrain ===
         self.pretraining=False  
         self.warmup_enable=cfg.ALGORITHM.PRE_TRAIN.ENABLE
         self.l_num=len(self.labeled_trainloader.dataset)
         self.ul_num=len(self.unlabeled_trainloader.dataset)  
-        self.id_masks=torch.zeros(self.ul_num).cuda()
+        self.id_masks=torch.ones(self.ul_num).cuda()
         self.ood_masks=torch.zeros(self.ul_num).cuda() 
         self.warmup_temperature=self.cfg.ALGORITHM.PRE_TRAIN.SimCLR.TEMPERATURE
-        self.warmup_iter=cfg.ALGORITHM.PRE_TRAIN.WARMUP_EPOCH*self.train_per_step 
-        self.feature_dim=128  
-        self.k=cfg.ALGORITHM.PRE_TRAIN.OOD_DETECTOR.K     
-        self.rebuild_unlabeled_dataset_enable=False        
-        self.opearte_before_resume() 
-        l_dataset = self.labeled_trainloader.dataset 
-        l_data_np,l_transform = l_dataset.select_dataset(return_transforms=True)
-        new_l_dataset = BaseNumpyDataset(l_data_np, transforms=l_transform,num_classes=self.num_classes)
-        self.test_labeled_trainloader = _build_loader(self.cfg, new_l_dataset,is_train=False)
-        ul_dataset = self.unlabeled_trainloader.dataset 
-        ul_data_np,ul_transform = ul_dataset.select_dataset(return_transforms=True)
-        new_ul_dataset = BaseNumpyDataset(ul_data_np, transforms=ul_transform,num_classes=self.num_classes)
-        self.test_unlabeled_trainloader = _build_loader(self.cfg, new_ul_dataset,is_train=False)
         
+        self.warmup_loss=SoftSupConLoss(temperature=self.warmup_temperature)
+        
+        self.warmup_iter=cfg.ALGORITHM.MOOD.WARMUP_EPOCH*self.train_per_step 
+        self.feature_dim=64 if self.cfg.MODEL.NAME in ['WRN_28_2','WRN_28_8','Resnet50',"Resnet34"] else 128 
+        self.k=cfg.ALGORITHM.OOD_DETECTOR.K    
+        self.id_thresh_percent=cfg.ALGORITHM.OOD_DETECTOR.THRESH_PERCENT
+        self.ood_detect_fusion = FusionMatrix(2)   
+        self.id_detect_fusion = FusionMatrix(2)  
+        
+        self.rebuild_unlabeled_dataset_enable=False        
+        self.opearte_before_resume()
+        if cfg.DATASET.NAME!='semi-iNat':
+            self.ul_ood_num=self.unlabeled_trainloader.dataset.ood_num  
+            
+            l_dataset = self.labeled_trainloader.dataset 
+            l_data_np,l_transform = l_dataset.select_dataset(return_transforms=True)
+            new_l_dataset = BaseNumpyDataset(l_data_np, transforms=l_transform,num_classes=self.num_classes)
+            self.test_labeled_trainloader = _build_loader(self.cfg, new_l_dataset,is_train=False)
+            
+            ul_dataset = self.unlabeled_trainloader.dataset 
+            ul_data_np,ul_transform = ul_dataset.select_dataset(return_transforms=True)
+            new_ul_dataset = BaseNumpyDataset(ul_data_np, transforms=ul_transform,num_classes=self.num_classes)
+            self.test_unlabeled_trainloader = _build_loader(self.cfg, new_ul_dataset,is_train=False)
+        
+            
     def prepare_output_path(self,cfg,logger):
         return prepare_output_path(cfg,logger)
     
@@ -89,8 +134,7 @@ class BaseTrainer():
         return create_logger(cfg) 
     
     def opearte_before_resume(self):
-        pass   
-      
+        pass     
     @classmethod
     def build_model(cls, cfg)  :
         model = models.__dict__[cfg.MODEL.NAME](cfg)
@@ -110,7 +154,16 @@ class BaseTrainer():
     
     def build_data_loaders(self,)  :
         dataloaders=build_dataloader(self.cfg,self.logger)
-        self.domain_trainloader=dataloaders[0] # for MTCF
+        
+        if self.cfg.DATASET.NAME=='semi-iNat':
+            self.labeled_trainloader=dataloaders[0]
+            self.labeled_train_iter=iter(self.labeled_trainloader) 
+            self.unlabeled_trainloader=dataloaders[1]
+            self.unlabeled_train_iter=iter(self.unlabeled_trainloader)   
+            self.test_loader=dataloaders[2] 
+            return
+        
+        self.domain_trainloader=dataloaders[0]
         self.labeled_trainloader=dataloaders[1]
         self.labeled_train_iter=iter(self.labeled_trainloader)        
         # DU               
@@ -118,9 +171,170 @@ class BaseTrainer():
         self.unlabeled_train_iter=iter(self.unlabeled_trainloader)   
         self.val_loader=dataloaders[3]
         self.test_loader=dataloaders[4]
-        self.pre_train_loader=dataloaders[5] # for OOD detector
+        self.pre_train_loader=dataloaders[5]
         self.pre_train_iter=iter(self.pre_train_loader)  
         return  
+    
+    # def froze_backbone(self,model):
+    #     for name, p in model.named_parameters(): 
+    #         if 'fc' not in name:
+    #             p.requires_grad = False
+                
+    def finetune(self,model_resume='best_model.pth'):
+        self.logger.info("*************** Finetuning ***************")
+        self.finetune_iters=self.cfg.FINETUNE_STEP
+        model_path=os.path.join(self.model_dir,model_resume)
+        
+        self.load_checkpoint(model_path)
+        # self.froze_backbone(self.model)
+        self.model.froze_backbone()
+        self.model.reset_classifier()   
+        self._rebuild_optimizer(self.model)
+        self.build_balanced_dataloader()
+        fusion_matrix = FusionMatrix(self.num_classes)
+        acc = AverageMeter()      
+        self.loss_init()
+        start_time = time.time()   
+        self.epoch=1
+        self.start_iter=1
+        for self.iter in range(self.start_iter, self.start_iter+self.finetune_iters):
+            return_data=self.finetune_step()
+            if return_data is not None:
+                pred,gt=return_data[0],return_data[1]
+                fusion_matrix.update(pred, gt) 
+            if self.iter%self.train_per_step==0:  
+                end_time = time.time()           
+                time_second=(end_time - start_time)
+                eta_seconds = time_second * (self.max_epoch - self.epoch)
+                eta_string = str(datetime.timedelta(seconds=int(eta_seconds)))
+                    
+                group_acc=fusion_matrix.get_group_acc(self.cfg.DATASET.GROUP_SPLITS)
+                self.train_group_accs.append(group_acc)
+                results=self.evaluate()
+                
+                
+                self.train_losses.append(self.losses.avg)
+                self.logger.info("== Pretraining is enable:{}".format(self.pretraining))
+                self.logger.info('== Train_loss:{:>5.4f}  train_loss_x:{:>5.4f}   train_loss_u:{:>5.4f} '.\
+                    format(self.losses.avg, self.losses_x.avg, self.losses_u.avg))
+                self.logger.info('== val_losss:{:>5.4f}   test_loss:{:>5.4f}   epoch_Time:{:>5.2f}min eta:{}'.\
+                        format(self.val_losses[-1], self.test_losses[-1],time_second / 60,eta_string))
+                self.logger.info('== Train  group_acc: many:{:>5.2f}  medium:{:>5.2f}  few:{:>5.2f}'.format(self.train_group_accs[-1][0]*100,self.train_group_accs[-1][1]*100,self.train_group_accs[-1][2]*100))
+                self.logger.info('==  Val   group_acc: many:{:>5.2f}  medium:{:>5.2f}  few:{:>5.2f}'.format(self.val_group_accs[-1][0]*100,self.val_group_accs[-1][1]*100,self.val_group_accs[-1][2]*100))
+                self.logger.info('==  Test  group_acc: many:{:>5.2f}  medium:{:>5.2f}  few:{:>5.2f}'.format(self.test_group_accs[-1][0]*100,self.test_group_accs[-1][1]*100,self.test_group_accs[-1][2]*100))
+                self.logger.info('== Val_acc:{:>5.2f}  Test_acc:{:>5.2f}'.format(results[0]*100,results[1]*100))
+                self.logger.info('== Best Results: Epoch:{} Val_acc:{:>5.2f}  Test_acc:{:>5.2f}'.format(self.best_val_iter//self.train_per_step,self.best_val*100,self.best_val_test*100))
+                if self.best_val<results[0]:
+                    self.best_val=results[0]
+                    self.best_val_test=results[1]
+                    self.best_val_iter=self.iter
+                    self.save_checkpoint(file_name="best_model_finetune.pth")
+                if self.epoch%self.save_epoch==0:
+                    self.save_checkpoint(file_name="checkpoint_finetune.pth")
+                # reset 
+                fusion_matrix = FusionMatrix(self.num_classes)
+                acc = AverageMeter()                 
+                self.loss_init()             
+                start_time = time.time()   
+                self.operate_after_epoch()
+                self.epoch= (self.iter // self.train_per_step)+1   
+        return
+    
+    def finetune_step(self):
+        self.model.train()
+        loss =0
+        # DL  
+        try:        
+            inputs_x, targets_x,_ = self.labeled_train_iter.next() 
+        except:
+            self.labeled_train_iter=iter(self.labeled_trainloader)
+            inputs_x, targets_x,_ = self.labeled_train_iter.next() 
+        if  isinstance(inputs_x,list)  :
+            inputs_x=inputs_x[0]
+        
+        # DU   
+        try:       
+            data = self.unlabeled_train_iter.next()
+        except:
+            self.unlabeled_train_iter=iter(self.unlabeled_trainloader)
+            data = self.unlabeled_train_iter.next()
+        inputs_u=data[0][0]
+        inputs_u2=data[0][1]
+         
+        inputs_x, targets_x = inputs_x.cuda(), targets_x.long().cuda(non_blocking=True)        
+        inputs_u , inputs_u2= inputs_u.cuda(),inputs_u2.cuda()          
+        x=torch.cat((inputs_x,inputs_u,inputs_u2),dim=0) 
+        
+        # fixmatch pipelines
+        logits_concat = self.model(x)
+        num_labels=inputs_x.size(0)
+        logits_x = logits_concat[:num_labels]
+
+        # loss computation 
+        lx=self.l_criterion(logits_x, targets_x.long()) 
+        # compute 1st branch accuracy
+        score_result = self.func(logits_x)
+        now_result = torch.argmax(score_result, 1)         
+        logits_weak, logits_strong = logits_concat[num_labels:].chunk(2)
+        with torch.no_grad():
+            # compute pseudo-label
+            p = logits_weak.softmax(dim=1)  # soft pseudo labels
+            confidence, pred_class = torch.max(p.detach(), dim=1) 
+            loss_weight = confidence.ge(self.conf_thres).float()
+         
+        lu = self.ul_criterion(
+            logits_strong, pred_class, weight=loss_weight, avg_factor=pred_class.size(0)
+        ) 
+        loss+=lx+lu
+        # record loss
+        self.losses.update(loss.item(), inputs_x.size(0))
+        self.losses_x.update(lx.item(), inputs_x.size(0))
+        self.losses_u.update(lu.item(), inputs_u.size(0)) 
+
+        # compute gradient and do SGD step
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step() 
+        if self.iter % self.cfg.SHOW_STEP==0:
+             self.logger.info('== Finetune Epoch:{} Step:[{}|{}] Avg_Loss_x:{:>5.4f} Avg_Loss_u:{:>5.4f} =='\
+                .format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses_x.avg,self.losses_u.avg))
+        return now_result.cpu().numpy(), targets_x.cpu().numpy()
+    
+    def build_balanced_dataloader(self):
+        l_dataset = self.labeled_trainloader.dataset
+        l_data_np,transform= l_dataset.select_dataset(return_transforms=True) 
+        new_l_dataset = BaseNumpyDataset(l_data_np, transforms=transform,num_classes=self.num_classes)
+        new_loader = _build_loader(self.cfg, new_l_dataset,sampler_name='ClassBalancedSampler')
+        self.labeled_trainloader=new_loader
+        self.labeled_train_iter=iter(self.labeled_trainloader)
+        return   
+    
+    def train_warmup_step_by_dl_contra(self):
+        self.model.train()
+        loss =0
+        # DL  
+        try:
+            (inputs_x,inputs_x2), targets,_ = self.pre_train_iter.next()  
+        except:            
+            self.pre_train_iter=iter(self.pre_train_loader)            
+            (inputs_x,inputs_x2),targets,_ = self.pre_train_iter.next()  
+            
+        inputs_x = torch.cat([inputs_x,inputs_x2],dim=0).cuda() #inputs_x.cuda(), inputs_x2.cuda()    
+        out_1 = self.model(inputs_x,return_encoding=True) 
+        out = self.model(out_1,return_projected_feature=True)
+        loss=self.warmup_loss(features)
+        self.optimizer.zero_grad()
+        loss.backward()
+        self.optimizer.step()
+        self.losses.update(loss.item(),inputs_x.size(0))
+        
+        if self.ema_enable:
+            current_lr = self.optimizer.param_groups[0]["lr"]
+            ema_decay =self.ema_model.update(self.model, step=self.iter, current_lr=current_lr)
+        if self.iter % self.cfg.SHOW_STEP==0:
+            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='\
+                .format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses.val,self.losses_x.avg,self.losses_u.val))
+        return 
     
     def train_warmup_step(self): #
         self.model.train() 
@@ -131,20 +345,20 @@ class BaseTrainer():
         except:            
             self.pre_train_iter=iter(self.pre_train_loader)            
             (inputs_x,inputs_x2),_,_ = self.pre_train_iter.next()  
-        inputs_x, inputs_x2 = inputs_x.cuda(), inputs_x2.cuda() 
-        
-        out_1 = self.model(inputs_x,return_encoding=True) 
-        out_2 = self.model(inputs_x2,return_encoding=True)  
-        out_1=self.model(out_1,return_projected_feature=True)
-        out_2=self.model(out_2,return_projected_feature=True)
-                
-        similarity  = pairwise_similarity(out_1,out_2,temperature=self.warmup_temperature) 
-        loss        = NT_xent(similarity) 
+        inputs_x = torch.cat([inputs_x,inputs_x2],dim=0).cuda()  
+        encoding = self.model(inputs_x,return_encoding=True) 
+        features = self.model(encoding,return_projected_feature=True)
+        f_u_s1,f_u_s2=features.chunk(2)
+        features = torch.cat([f_u_s1.unsqueeze(1), f_u_s2.unsqueeze(1)], dim=1)  
+        loss=self.warmup_loss(features) 
         self.optimizer.zero_grad()
         loss.backward()
         self.optimizer.step()
         self.losses.update(loss.item(),inputs_x.size(0))
         
+        if self.ema_enable:
+            current_lr = self.optimizer.param_groups[0]["lr"]
+            ema_decay =self.ema_model.update(self.model, step=self.iter, current_lr=current_lr)
         if self.iter % self.cfg.SHOW_STEP==0:
             self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='\
                 .format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses.val,self.losses_x.avg,self.losses_u.val))
@@ -201,12 +415,23 @@ class BaseTrainer():
                 # reset 
                 fusion_matrix = FusionMatrix(self.num_classes)
                 acc = AverageMeter()                 
-                self.epoch= (self.iter // self.train_per_step)+1   
                 self.loss_init()             
                 start_time = time.time()   
                 self.operate_after_epoch()
-                 
+                self.epoch+=1   
+                
+        self.plot()       
         return
+    
+    def build_data_loaders_for_dl_contra(self,)  :  
+        l_dataset = self.labeled_trainloader.dataset
+        l_data_np= l_dataset.select_dataset()
+        _,transform= self.pre_train_loader.dataset.select_dataset(return_transforms=True)
+        new_l_dataset = BaseNumpyDataset(l_data_np, transforms=transform,num_classes=self.num_classes)
+        new_loader = _build_loader(self.cfg, new_l_dataset,is_train=False)
+        self.pre_train_loader=new_loader
+        self.pre_train_iter=iter(self.pre_train_loader)
+        return  
     
     def rebuild_unlabeled_dataset(self,selected_inds):
         ul_dataset = self.unlabeled_trainloader.dataset
@@ -223,32 +448,77 @@ class BaseTrainer():
             )
         self.unlabeled_train_iter = iter(new_loader)
     
+    def load_id_masks(self):
+        id_mask_path=os.path.join(self.model_dir.replace(self.cfg.ALGORITHM.NAME,'OODDetect'),'checkpoint.pth')
+        if os.path.exists(id_mask_path):
+            self.logger.info(f"Resuming id_masks from: {id_mask_path}")
+            self.logger.info(' ')
+            state_dict = torch.load(id_mask_path) 
+            self.id_masks=state_dict['id_masks']
+            self.ood_masks=state_dict['ood_masks']   
+            du_gt=torch.cat([torch.ones(self.ul_num-self.ul_ood_num),torch.zeros(self.ul_ood_num)],dim=0)
+            
+            self.id_detect_fusion.update(self.id_masks,du_gt)
+            self.ood_detect_fusion.update(self.ood_masks,1-du_gt)        
+            
+            id_pre,id_rec=self.id_detect_fusion.get_pre_per_class()[1],self.id_detect_fusion.get_rec_per_class()[1]
+            ood_pre,ood_rec=self.ood_detect_fusion.get_pre_per_class()[1],self.ood_detect_fusion.get_rec_per_class()[1]
+            tpr=self.id_detect_fusion.get_TPR()
+            tnr=self.ood_detect_fusion.get_TPR()        
+            self.logger.info("== OOD_Pre:{:>5.3f} ID_Pre:{:>5.3f} OOD_Rec:{:>5.3f} ID_Rec:{:>5.3f}".\
+                format(ood_pre*100,id_pre*100,ood_rec*100,id_rec*100))
+            self.logger.info("=== TPR : {:>5.2f}  TNR : {:>5.2f} ===".format(tpr*100,tnr*100))
+            
+            with torch.no_grad():
+                for  i, (inputs, targets, idx) in enumerate(self.test_unlabeled_trainloader):
+                    self.ood_detect_confusion_matrix.update(self.id_masks[idx], targets)
+
+            tprs=self.ood_detect_confusion_matrix.get_TPR_per_class()
+            fnrs=self.ood_detect_confusion_matrix.get_FNR_per_class()
+            # self.ood_detect_confusion_matrix.plot_ood_detect_confusion_bar( tprs=tprs,fnrs=fnrs,labels=[i+1 for i in range(self.num_classes)],save_path=os.path.join(self.pic_dir,'ood_detection_bar.jpg'))
+        
+            self.logger.info('=== Class TPRS:{}'.format(tprs))
+            self.logger.info('=== Class TNRS:{}'.format(fnrs))
+            
+        
+            self.logger.info("Successfully loaded the id_mask.") 
+        else:
+            self.logger.info('Id mask path: {} is not existing!'.format(id_mask_path))
+        return
+    
     def detect_ood(self):
-        normalizer = lambda x: x / (np.linalg.norm(x, ord=2, axis=-1, keepdims=True) + 1e-10)        
-        l_feat=self.prepare_feat(self.test_labeled_trainloader)
-        l_feat=normalizer(l_feat)
-        u_feat=self.prepare_feat(self.test_unlabeled_trainloader) 
-        u_feat=normalizer(u_feat)
+        # normalizer = lambda x: x / (np.linalg.norm(x, ord=2, axis=-1, keepdims=True) + 1e-10)        
+        l_feat,l_y=self.prepare_feat(self.test_labeled_trainloader)
+        # l_feat=normalizer(l_feat)
+        u_feat,u_y=self.prepare_feat(self.test_unlabeled_trainloader) 
+        # u_feat=normalizer(u_feat)
+        du_gt=torch.zeros(self.ul_num) 
         id_mask=torch.zeros(self.ul_num).long().cuda()
         ood_mask=torch.zeros(self.ul_num).long().cuda()
+        du_gt=(u_y>=0).float().long().cuda() 
         index = faiss.IndexFlatL2(l_feat.shape[1])
         index.add(l_feat)
         D, _ = index.search(u_feat, self.k) 
-        novel = -D[:,-1]  
+        novel = -D[:,-1] # -最大的距离
         D2, _ = index.search(l_feat, self.k)
-        known=-D2[:,-1]   
-        known.sort()
-        thresh = known[round(0.05*self.l_num)]        
+        known= - D2[:,-1] # -最大的距离 
+        known.sort() # 从小到大排序 负号
+        thresh = known[round(0.05*self.l_num)] #known[50] #  known[round(0.05 * self.l_num)]        
         id_masks= (torch.tensor(novel)>=thresh).float()
         ood_masks=1-id_masks 
         self.id_masks= id_masks
         self.ood_masks=1-id_masks
         self.id_masks=self.id_masks.cuda()
         self.ood_masks=self.ood_masks.cuda()
+        self.id_detect_fusion.reset()
+        self.ood_detect_fusion.reset()
+        self.id_detect_fusion.update(id_masks.numpy(),du_gt) 
+        self.ood_detect_fusion.update(ood_masks,1-du_gt)  
         if self.rebuild_unlabeled_dataset_enable and self.iter==self.warmup_iter:
             id_index=torch.nonzero(id_mask == 1, as_tuple=False).squeeze(1)
             id_index=id_index.cpu().numpy()
             self.rebuild_unlabeled_dataset(id_index)   
+    
     
     def operate_after_epoch(self): 
         if self.warmup_enable:
@@ -256,7 +526,17 @@ class BaseTrainer():
                 self.detect_ood()
             if self.iter==self.warmup_iter: 
                 self.save_checkpoint(file_name="warmup_model.pth")
-               
+            id_pre,id_rec=self.id_detect_fusion.get_pre_per_class()[1],self.id_detect_fusion.get_rec_per_class()[1]
+            ood_pre,ood_rec=self.ood_detect_fusion.get_pre_per_class()[1],self.ood_detect_fusion.get_rec_per_class()[1]
+            
+            # ood_pre,id_pre=self.id_detect_fusion.get_pre_per_class()
+            # ood_rec,id_rec=self.id_detect_fusion.get_rec_per_class()
+            tpr=self.id_detect_fusion.get_TPR()
+            tnr=self.ood_detect_fusion.get_TPR()
+            self.logger.info("== ood_prec:{:>5.3f} id_prec:{:>5.3f} ood_rec:{:>5.3f} id_rec:{:>5.3f}".\
+                format(ood_pre*100,id_pre*100,ood_rec*100,id_rec*100))
+            self.logger.info("=== TPR : {:>5.2f}  TNR : {:>5.2f} ===".format(tpr*100,tnr*100))
+            self.logger.info('=='*40)     
         else:
             self.logger.info("=="*30)
         pass
@@ -266,16 +546,30 @@ class BaseTrainer():
     
     def _rebuild_models(self):
         model = self.build_model(self.cfg) 
-        self.model = model.cuda() 
+        self.model = model.cuda()
+        self.ema_model = EMAModel(
+            self.model,
+            self.cfg.MODEL.EMA_DECAY,
+            self.cfg.MODEL.EMA_WEIGHT_DECAY,
+        )
+        # .cuda() 
         
     def _rebuild_optimizer(self, model):
         self.optimizer = self.build_optimizer(self.cfg, model)
-        torch.cuda.empty_cache()    
+        
+        torch.cuda.empty_cache()
+    
+    
+    def get_test_best(self):
+        return self.best_val_test
     
     def evaluate(self,return_group_acc=False,return_class_acc=False):  
         eval_model=self.get_val_model() 
-        val_loss, val_acc,val_group_acc,val_class_acc = self.eval_loop(eval_model,self.val_loader, self.val_criterion)
         test_loss, test_acc ,test_group_acc,test_class_acc=  self.eval_loop(eval_model,self.test_loader, self.val_criterion)
+        if self.valset_enable:
+            val_loss, val_acc,val_group_acc,val_class_acc = self.eval_loop(eval_model,self.val_loader, self.val_criterion) 
+        else: 
+            val_loss, val_acc,val_group_acc,val_class_acc=test_loss, test_acc ,test_group_acc,test_class_acc
         self.val_losses.append(val_loss)
         self.val_accs.append(val_acc)
         self.val_group_accs.append(val_group_acc)
@@ -291,7 +585,122 @@ class BaseTrainer():
         if return_class_acc:
             return val_acc,test_acc,test_class_acc
         return [val_acc,test_acc]
-            
+    
+    
+    def get_case_pred_gt(self): 
+        model=self.get_val_model()
+        model.eval() 
+        with torch.no_grad():
+            for  i, (inputs, targets, _) in enumerate(self.test_loader):
+                inputs, targets = inputs.cuda(), targets.cuda(non_blocking=True)
+                # compute output
+                outputs = model(inputs,training=False) 
+                probs_u_w = torch.softmax(outputs.detach(), dim=-1)
+                max_probs, pred_class = torch.max(probs_u_w, dim=-1)  
+                return max_probs[max_probs.shape[0]//3],pred_class[pred_class.shape[0]//3] 
+
+    def get_case_cosine(self): 
+        model=self.get_val_model()
+        model.eval() 
+        with torch.no_grad():
+            for  i, (inputs, targets, _) in enumerate(self.test_loader):
+                inputs, targets = inputs.cuda(), targets.cuda(non_blocking=True)
+                # compute output
+                encoding = model(inputs,return_encoding=True,training=False) 
+                feature=model(encoding,return_projected_feature=True,training=False) 
+                cos_sim= cosine_similarity(feature.detach(),feature.detach()) 
+                return cos_sim.cpu().numpy()
+    
+    def get_test_data_pred_gt_feat(self,return_confidence=False):
+        model=self.get_val_model()
+        model.eval()
+        pred=[]
+        gt=[]
+        feat=[]
+        confidence=[]
+        with torch.no_grad():
+            for  i, (inputs, targets, _) in enumerate(self.val_loader):
+                inputs, targets = inputs.cuda(), targets.cuda(non_blocking=True)
+
+                # compute output
+                outputs = model(inputs,training=False)
+                feature=model(inputs,return_encoding=True)
+                # feature=model(feature,return_projected_feature=True)
+                
+                p = outputs.softmax(dim=1)  # soft pseudo labels
+                con, pred_class = torch.max(p.detach(), dim=1) 
+                p=torch.gather(p, dim=1, index=targets.long().unsqueeze(1))
+                confidence.append(p.cpu())
+                gt.append(targets.cpu())   
+                pred.append(pred_class.cpu())
+                feat.append(feature.cpu())
+            pred=torch.cat(pred,dim=0)
+            gt=torch.cat(gt,dim=0)
+            feat=torch.cat(feat,dim=0)
+            confidence=torch.cat(confidence,dim=0)
+        if not return_confidence:
+            return gt,pred,feat
+        else:return gt,pred,feat,confidence
+               
+    def get_train_dl_data_pred_gt_feat(self,return_confidence=False):
+        model=self.get_val_model()
+        model.eval()
+        pred=[]
+        gt=[]
+        feat=[]
+        with torch.no_grad():
+            for  i, (inputs, targets, _) in enumerate(self.test_labeled_trainloader):
+                if isinstance(inputs,list):
+                    inputs=inputs[0]
+                inputs, targets = inputs.cuda(), targets.cuda(non_blocking=True)
+                
+                # compute output
+                outputs = model(inputs)
+                feature=model(inputs,return_encoding=True)
+                feature=model(feature,return_projected_feature=True)
+                score_result = self.func(outputs)
+                now_result = torch.argmax(score_result, 1)   
+                gt.append(targets.cpu())   
+                pred.append(now_result.cpu())
+                feat.append(feature.cpu())
+            pred=torch.cat(pred,dim=0)
+            gt=torch.cat(gt,dim=0)
+            feat=torch.cat(feat,dim=0)
+        return gt,pred,feat
+    
+    def get_train_du_data_pred_gt_feat(self,return_confidence=False):
+        model=self.get_val_model()
+        model.eval()
+        pred=[]
+        gt=[]
+        feat=[]
+        confidence=[]
+        with torch.no_grad():
+            for  i, (inputs, targets, _) in enumerate(self.test_unlabeled_trainloader):
+                if isinstance(inputs,list):
+                    inputs=inputs[0]
+                inputs, targets = inputs.cuda(), targets.cuda(non_blocking=True)
+                
+                # compute output
+                outputs = model(inputs)
+                feature=model(inputs,return_encoding=True)
+                # feature=model(feature,return_projected_feature=True)
+                
+                p = outputs.softmax(dim=1)  # soft pseudo labels
+                con, pred_class = torch.max(p.detach(), dim=1) 
+                p=torch.gather(p, dim=1, index=targets.long().unsqueeze(1))
+                confidence.append(p.cpu())
+                gt.append(targets.cpu())   
+                pred.append(pred_class.cpu())
+                feat.append(feature.cpu())
+            pred=torch.cat(pred,dim=0)
+            gt=torch.cat(gt,dim=0)
+            feat=torch.cat(feat,dim=0)
+            confidence=torch.cat(confidence,dim=0)
+        if not return_confidence:
+            return gt,pred,feat
+        else:return gt,pred,feat,confidence
+    
     def eval_loop(self,model,valloader,criterion):
         losses = AverageMeter() 
         # switch to evaluate mode
@@ -303,11 +712,11 @@ class BaseTrainer():
             for  i, (inputs, targets, _) in enumerate(valloader):
                 # measure data loading time 
 
-                inputs, targets = inputs.cuda(), targets.cuda(non_blocking=True)
+                inputs, targets = inputs.cuda(), targets.long().cuda(non_blocking=True)
 
                 # compute output
                 outputs = model(inputs)
-                if len(outputs)==2:
+                if len(outputs)==2 and len(outputs)!=len(targets):
                     outputs=outputs[0]
                 loss = criterion(outputs, targets)
 
@@ -334,7 +743,7 @@ class BaseTrainer():
                     'best_val_test': self.best_val_test,
                     'optimizer': self.optimizer.state_dict(), 
                     'id_masks':self.id_masks,
-                    'ood_masks':self.ood_masks,                   
+                    'ood_masks':self.ood_masks,                                        
                 },  os.path.join(self.model_dir, file_name))
         return 
     
@@ -379,14 +788,33 @@ class BaseTrainer():
             id_index=torch.nonzero(self.id_masks == 1, as_tuple=False).squeeze(1)
             id_index=id_index.cpu().numpy()
             self.rebuild_unlabeled_dataset(id_index) 
-     
+   
+    def get_prototypes(self,feat,y):
+        prototypes=torch.zeros(self.num_classes,self.feature_dim)
+        for c in range(self.num_classes):
+            select_index= torch.nonzero(y == c, as_tuple=False).squeeze(1)
+            if select_index.shape[0]>0: 
+                prototypes[c] = feat[select_index].mean(dim=0) 
+        return prototypes
+         
+    def plot(self):
+        plot_group_acc_over_epoch(group_acc=self.train_group_accs,title="Train Group Average Accuracy",save_path=os.path.join(self.pic_dir,'train_group_acc.jpg'))
+        plot_group_acc_over_epoch(group_acc=self.val_group_accs,title="Val Group Average Accuracy",save_path=os.path.join(self.pic_dir,'val_group_acc.jpg'))
+        plot_group_acc_over_epoch(group_acc=self.test_group_accs,title="Test Group Average Accuracy",save_path=os.path.join(self.pic_dir,'test_group_acc.jpg'))
+        plot_acc_over_epoch(self.train_accs,title="Train average accuracy",save_path=os.path.join(self.pic_dir,'train_acc.jpg'),)
+        plot_acc_over_epoch(self.test_accs,title="Test average accuracy",save_path=os.path.join(self.pic_dir,'test_acc.jpg'),)
+        plot_acc_over_epoch(self.val_accs,title="Val average accuracy",save_path=os.path.join(self.pic_dir,'val_acc.jpg'),)
+        plot_loss_over_epoch(self.train_losses,title="Train Average Loss",save_path=os.path.join(self.pic_dir,'train_loss.jpg'))
+        plot_loss_over_epoch(self.val_losses,title="Val Average Loss",save_path=os.path.join(self.pic_dir,'val_loss.jpg'))
+        plot_loss_over_epoch(self.test_losses,title="Test Average Loss",save_path=os.path.join(self.pic_dir,'test_loss.jpg'))
+    
     def get_class_counts(self,dataset):
         """
             Sort the class counts by class index in an increasing order
             i.e., List[(2, 60), (0, 30), (1, 10)] -> np.array([30, 10, 60])
         """
         return np.array(dataset.num_per_cls_list)
-          
+    
     def get_label_dist(self, dataset=None, normalize=None):
         """
             normalize: ["sum", "max"]
@@ -431,6 +859,12 @@ class BaseTrainer():
                     cfg, loss_type, class_count=class_count, class_weight=per_class_weights
                 )
 
+            elif loss_override == "LDAM":
+                # LDAM loss
+                loss_fn = build_loss(
+                    cfg, "LDAMLoss", class_count=class_count, class_weight=per_class_weights
+                )
+
             else:
                 raise ValueError()
         else:
@@ -439,19 +873,152 @@ class BaseTrainer():
             )
 
         return loss_fn
-    
-    def prepare_feat(self,dataloader):
+
+    def get_dl_embed_center(self):
         model=self.get_val_model().eval()
-        n=dataloader.dataset.total_num
-        feat=torch.zeros((n,self.feature_dim)) 
+        emb = []
+        centers = [0 for c in range(self.num_classes)]
+        cnt = [0 for c in range(self.num_classes)]
         with torch.no_grad():
-            for batch_idx,(inputs, targets, idx) in enumerate(dataloader):
+            for batch_idx,(inputs, targets, _) in enumerate(self.labeled_trainloader):
                 if len(inputs)==2 or len(inputs)==3:
                     inputs=inputs[0]
                 inputs, targets = inputs.cuda(), targets.cuda()
                 outputs=self.model(inputs,return_encoding=True)
-                outputs=self.model(outputs,return_projected_feature=True) 
-                feat[idx]=   outputs.cpu()  
-        return feat
+                outputs=self.model(outputs,return_projected_feature=True)                
+                emb.append(outputs.cpu())
+                for ii in range(targets.size(0)):
+                    cnt[targets[ii].item()] = cnt[targets[ii].item()] + 1
+                    centers[targets[ii].item()] = centers[targets[ii].item()] + outputs[ii].cpu()
+        for c in range(self.num_classes):
+            centers[c] = (centers[c] / cnt[c]).unsqueeze(0)
+        centers = torch.cat(centers, dim=0)
+        emb = torch.cat(emb, dim=0)
+        return emb, centers   
     
-         
+    def prepare_feat(self,dataloader,return_confidence=False):
+        model=self.get_val_model().eval()
+        n=dataloader.dataset.total_num
+        feat=torch.zeros((n,self.feature_dim)) 
+        targets_y=torch.zeros(n).long()
+        confidence=torch.zeros(n)  
+        probs=torch.zeros(n,self.num_classes) 
+        with torch.no_grad():
+            for batch_idx,(inputs, targets, idx) in enumerate(dataloader):
+                if isinstance(inputs, list):
+                    inputs=inputs[0]
+                inputs, targets = inputs.cuda(), targets.cuda()
+                encoding=self.model(inputs,return_encoding=True)
+                outputs=self.model(encoding,return_projected_feature=True) 
+                logits=self.model(encoding,classifier=True)
+                prob = torch.softmax(logits.detach(), dim=-1) 
+                max_probs, pred_class = torch.max(prob, dim=-1)  
+                
+                feat[idx] =   outputs.cpu()  
+                targets_y[idx] = targets.cpu()                 
+                confidence[idx]=max_probs.cpu()
+                probs[idx]=prob.cpu()
+                
+        # feat=torch.cat(feat,dim=0)
+        # targets_y=torch.cat(targets_y,dim=0)
+        if return_confidence:
+            return feat,targets_y,[confidence,probs]
+            
+        return feat,targets_y
+    
+    def pred_unlabeled_data(self):
+        model=self.get_val_model() 
+        count=[0]*self.num_classes
+        fusionMatrix=FusionMatrix(self.num_classes)
+        with torch.no_grad():
+            for batch_idx,(inputs, targets, idx) in enumerate(self.unlabeled_trainloader):
+                inputs, targets = inputs[0].cuda(), targets.cuda()
+                logits_u_w=self.model(inputs) 
+                probs_u_w = torch.softmax(logits_u_w.detach(), dim=-1)
+                max_probs, pred_class = torch.max(probs_u_w, dim=-1)     
+                select_index=torch.nonzero(targets == -1, as_tuple=False).squeeze(1)
+                ood_pred=pred_class[select_index]
+                ood_probs=max_probs[select_index] 
+                if select_index.shape[0]>0:
+                    miscls_idx=torch.nonzero(ood_probs >=self.conf_thres, as_tuple=False).squeeze(1)
+                    for item in miscls_idx:
+                        count[ood_pred[item]]+=1
+                
+                id_select_index=torch.nonzero(targets != -1, as_tuple=False).squeeze(1) 
+                if id_select_index.shape[0]>0:
+                    cls_idx=torch.nonzero(max_probs[id_select_index] >=self.conf_thres, as_tuple=False).squeeze(1)
+                    if cls_idx.shape[0]>0: 
+                        fusionMatrix.update(pred_class[id_select_index][cls_idx].cpu().numpy(),targets[id_select_index][cls_idx].cpu().numpy())
+        acc=fusionMatrix.get_acc_per_class()
+        return count,acc
+                    
+    def pred_test_data(self):
+        model=self.model.eval()
+        # count=[0]*self.num_classes
+        # fusionMatrix=FusionMatrix(self.num_classes)
+        fusionMatrix2=FusionMatrix(self.num_classes)
+        with torch.no_grad():
+            for batch_idx,(inputs, targets, idx) in enumerate(self.test_loader):
+                inputs, targets = inputs.cuda(), targets.cuda()
+                logits_u_w=self.model(inputs) 
+                probs_u_w = torch.softmax(logits_u_w.detach(), dim=-1)
+                max_probs, pred_class = torch.max(probs_u_w, dim=-1)    
+                # cls_idx=torch.nonzero(max_probs >=self.conf_thres, as_tuple=False).squeeze(1)
+                fusionMatrix2.update(pred_class.cpu().numpy(),targets.cpu().numpy())
+                # if cls_idx.shape[0]>0: 
+                #     fusionMatrix.update(pred_class[cls_idx].cpu().numpy(),targets[cls_idx].cpu().numpy())
+        # acc=fusionMatrix.get_acc_per_class()
+        acc0=fusionMatrix2.get_acc_per_class()
+        return acc0
+              
+    def extract_feature(self):
+        model=self.get_val_model()
+        model.eval()
+        with torch.no_grad():
+            labeled_feat=[] 
+            labeled_y=[] 
+            labeled_idx=[]
+            for i,data in enumerate(self.test_labeled_trainloader):
+                inputs_x, targets_x,idx=data[0],data[1],data[2]
+                if len(inputs_x)<=3:
+                    inputs_x=inputs_x[0]
+                inputs_x=inputs_x.cuda()
+                feat=model(inputs_x,return_encoding=True)
+                # feat=model(feat,return_projected_feature=True)
+                labeled_feat.append(feat.cpu())
+                labeled_y.append(targets_x)
+                labeled_idx.append(idx)
+            labeled_feat=torch.cat(labeled_feat,dim=0).cpu()
+            labeled_y=torch.cat(labeled_y,dim=0) 
+            labeled_idx=torch.cat(labeled_idx,dim=0) 
+            unlabeled_feat=[]
+            unlabeled_y=[] 
+            unlabeled_idx=[]
+            for i,data in enumerate(self.unlabeled_trainloader):
+                inputs_u=data[0][0]
+                inputs_u=inputs_u.cuda()
+                target=data[1]      
+                idx=data[2]      
+                feat=model(inputs_u,return_encoding=True)
+                # feat=model(feat,return_projected_feature=True)
+                unlabeled_feat.append(feat.cpu())
+                unlabeled_y.append(target)
+                unlabeled_idx.append(idx)
+            unlabeled_feat=torch.cat(unlabeled_feat,dim=0)
+            unlabeled_y=torch.cat(unlabeled_y,dim=0) 
+            unlabeled_idx=torch.cat(unlabeled_idx,dim=0) 
+            test_feat=[]
+            test_y=[]
+            test_idx=[]
+            for i,data in enumerate(self.test_loader):
+                inputs_x, target,idx=data[0],data[1],data[2]
+                inputs_x=inputs_x.cuda()
+                feat=model(inputs_x,return_encoding=True)                
+                # feat=model(feat,return_projected_feature=True)
+                test_feat.append(feat.cpu())            
+                test_y.append(target)        
+                test_idx.append(idx)
+            test_feat=torch.cat(test_feat,dim=0)
+            test_y=torch.cat(test_y,dim=0) 
+            return (labeled_feat,labeled_y,labeled_idx),(unlabeled_feat,unlabeled_y,unlabeled_idx),(test_feat,test_y,test_idx)
+    

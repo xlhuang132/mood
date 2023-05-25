@@ -1,3 +1,4 @@
-from .resnet import * 
+from .wideresnet import * 
 from .projector import Projector
-from .classifier import Classifier 
+from .imagenet_resnet import resnet50
+ 

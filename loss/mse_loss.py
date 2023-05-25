@@ -1,8 +1,10 @@
+"""Reference: https://github.com/open-mmlab/mmdetection/blob/master/mmdet/models/losses/cross_entropy_loss.py"""  # noqa
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch import Tensor
 from yacs.config import CfgNode
+
 from typing import List, Optional, Tuple 
 from .utils import weight_reduce_loss, weighted_loss
 
@@ -11,7 +13,14 @@ def build_mse_loss(cfg: CfgNode, loss_weight: float = 1.0, class_weight=None,use
     return MSELoss(
         use_sigmoid=use_sigmoid, loss_weight=loss_weight, class_weight=class_weight
     )
-     
+    
+# def mse_loss(
+#     pred: Tensor,
+#     label: Tensor, 
+#     **kwargs
+# ): 
+#     loss=torch.mean((pred - label)**2)
+#     return loss
 @weighted_loss
 def mse_loss(pred: Tensor, target: Tensor) -> Tensor:
     """Warpper of mse loss."""
@@ -71,7 +80,7 @@ class MSELoss(nn.Module):
         """
         assert reduction_override in (None, 'none', 'mean', 'sum')
         reduction = (reduction_override if reduction_override else self.reduction)
-        if self.class_weight is not None: 
+        if self.class_weight is not None: # 类权重
             class_weight = self.class_weight
             if isinstance(class_weight, list):
                 class_weight = cls_score.new_tensor(class_weight)
@@ -83,5 +92,5 @@ class MSELoss(nn.Module):
             cls_score,
             label,
             **kwargs
-        ) 
+        )# 这一般是某个分类损失前的lambda
         return loss_cls

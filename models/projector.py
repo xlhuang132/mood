@@ -9,29 +9,52 @@ class Projector(nn.Module):
         if model_name: 
             if model_name == 'WRN_28_2':
                 self.linear_1 = nn.Linear(128, 128)
-                self.linear_2 = nn.Linear(128, 128)
+                self.linear_2 = nn.Linear(128, 64)
             elif model_name == 'WRN_28_8':
                 self.linear_1 = nn.Linear(512, 128)
-                self.linear_2 = nn.Linear(128, 128)
+                self.linear_2 = nn.Linear(128, 64)
+            elif model_name == 'Resnet18':
+                self.linear_1 = nn.Linear(512, 128)
+                self.linear_2 = nn.Linear(128, 64)
             elif model_name == 'Resnet34':
                 self.linear_1 = nn.Linear(512, 128)
-                self.linear_2 = nn.Linear(128, 128)
+                self.linear_2 = nn.Linear(128, 64)
             elif model_name == 'Resnet50':
                 self.linear_1 = nn.Linear(2048, 512)
-                self.linear_2 = nn.Linear(512, 128) 
+                self.linear_2 = nn.Linear(512, 64) 
         elif expansion == 0:
             self.linear_1 = nn.Linear(128, 128)
             self.linear_2 = nn.Linear(128, 128)
         else:
             self.linear_1 = nn.Linear(512*expansion, 512)
             self.linear_2 = nn.Linear(512, 128)
+            
+        # self.head=nn.Sequential(
+        #     nn.Linear(dim, hidden_size, bias=False),
+        #     nn.BatchNorm1d(hidden_size),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(hidden_size, hidden_size, bias=False),
+        #     nn.BatchNorm1d(hidden_size),
+        #     nn.ReLU(inplace=True),
+        #     nn.Linear(hidden_size, projection_size, bias=False),
+        #     nn.BatchNorm1d(projection_size, affine=False)
+        # )
 
-    def forward(self, x, internal_output_list=False,normalized=False):          
+
+    def forward(self, x, internal_output_list=False,normalized=False):
+            
+        output_list = []
+
         output = self.linear_1(x)
-        output = F.relu(output) 
-        if normalized:
+        output = F.relu(output)
+        
+        output_list.append(output)
+        if normalized: # l2norm
             output = F.normalize(self.linear_2(output),dim=-1)
         else:
-            output = self.linear_2(output) 
-
+            output = self.linear_2(output)
+        output_list.append(output)
+        
+        if internal_output_list:
+            return output,output_list
         return output 
