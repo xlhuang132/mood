@@ -5,13 +5,14 @@ from yacs.config import CfgNode
 from .build_transform import  build_simclr_transform
 from .base import BaseNumpyDataset
 from .transform import build_transforms
-from .utils import make_imbalance, map_dataset, split_trainval, split_val_from_train, x_u_split,ood_inject
+from .utils_ import make_imbalance, map_dataset, split_trainval, split_val_from_train, x_u_split,ood_inject
 import numpy as np
  
 def get_cifar10(root, out_dataset, start_label=0,ood_ratio=0, 
                  transform_train=None, transform_val=None,test_mode=False,
                  transform_train_ul=None,
-                 download=True,cfg=None,logger=None): 
+                 download=True,cfg=None,logger=None):
+    # fmt: off
     root = cfg.DATASET.ROOT
     algorithm = cfg.ALGORITHM.NAME
     num_l_head=cfg.DATASET.DL.NUM_LABELED_HEAD
@@ -26,9 +27,12 @@ def get_cifar10(root, out_dataset, start_label=0,ood_ratio=0,
     
     ood_r=cfg.DATASET.DU.OOD.RATIO if cfg.DATASET.DU.OOD.ENABLE else 0
     ood_dataset=cfg.DATASET.DU.OOD.DATASET
-    ood_root=cfg.DATASET.DU.OOD.ROOT 
+    ood_root=cfg.DATASET.DU.OOD.ROOT
+    # fmt: on
 
     logger = logging.getLogger()
+    
+    # l_trans, ul_trans, eval_trans = build_transforms(cfg, "cifar10")
     
     base_data = torchvision.datasets.CIFAR10(root, True, download=True)
     l_train=map_dataset(base_data)
@@ -55,6 +59,20 @@ def get_cifar10(root, out_dataset, start_label=0,ood_ratio=0,
             l_train, num_l_head, imb_factor_l, class_inds, seed=seed,is_dl=True
         )
 
+    if cfg.ALGORITHM.NAME == "DARP_ESTIM":
+        # held-out validation images subtracting from train images (DARP estimation stage)
+        num_l_tail = int(num_l_head * 1. / imb_factor_l)
+        num_holdout = cfg.ALGORITHM.DARP_ESTIM.PER_CLASS_VALID_SAMPLES
+        if num_l_tail > 10:
+            l_train, cifar10_valid = split_val_from_train(l_train, num_holdout)
+        else:
+            logger.info(
+                f"Tail class training examples ({num_l_tail}) are not sufficient. "
+                f"for constructing hold-out validation images ({num_holdout}). "
+                "Extracting from original validation set."
+            )
+            _, cifar10_valid = split_val_from_train(cifar10_valid, num_holdout)
+
     # make synthetic imbalance for unlabeled set
     if ul_train is not None and imb_factor_ul > 1:
         ul_train, class_inds = make_imbalance(
@@ -65,8 +83,12 @@ def get_cifar10(root, out_dataset, start_label=0,ood_ratio=0,
             reverse_ul_dist=reverse_ul_dist,
             seed=seed
         )
-    if ood_r>0:
-        ul_train=ood_inject(ul_train,ood_root,ood_r,ood_dataset)
+    if cfg.DATASET.DU.OOD.INCLUDE_ALL:         
+        ul_train=ood_inject(ul_train,ood_root,ood_dataset=ood_dataset,include_all=True)
+        # ul_train=ood_inject(ul_train,ood_root,ood_dataset,include_all=True)
+    else:
+        if ood_r>0:
+            ul_train=ood_inject(ul_train,ood_root,ood_r=ood_r,ood_dataset=ood_dataset)
     
     labeled_data_num=len(l_train['labels'])
     domain_labels=np.hstack((np.ones_like(l_train['labels'],dtype=np.float32),np.zeros_like(ul_train['labels'],dtype=np.float32)))
@@ -101,18 +123,24 @@ def get_cifar10(root, out_dataset, start_label=0,ood_ratio=0,
         logger.info(
             "=> number of unlabeled OOD data: {}\n".format( ul_train.ood_num)
         ) 
-    if cfg.ALGORITHM.NAME=='MTCF':  
+    if cfg.ALGORITHM.NAME=='MTCF':  # mtcf需要
         train_dataset =CIFAR10Dataset(total_train,transforms=transform_train_ul,
                                         num_classes=num_classes,soft_domain=True,
                                         labeled_data_num=labeled_data_num,
                                         domain_labels=domain_labels,                            
-                                        ) 
+                                        )
+        return l_train, ul_train, train_dataset, cifar10_valid, cifar10_test
+     
+    train_dataset =CIFAR10Dataset(total_train,transforms=transform_train_ul,num_classes=num_classes)
+    if cfg.ALGORITHM.NAME=='OODDetect':
+        transform_pre=transform_train_ul
     else:
-        train_dataset =CIFAR10Dataset(total_train,transforms=transform_train_ul,num_classes=num_classes)
-    transform_pre=build_simclr_transform(cfg)
+        transform_pre=build_simclr_transform(cfg)
     pre_train_dataset  =  CIFAR10Dataset(total_train,transforms=transform_pre,num_classes=num_classes)
     return l_train, ul_train, train_dataset, cifar10_valid, cifar10_test,pre_train_dataset
     
+
+
 def get_contra_cifar10(cfg):
     # fmt: off
     root = cfg.DATASET.ROOT

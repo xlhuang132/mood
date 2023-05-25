@@ -24,6 +24,25 @@ def build_contrastive_transforms(cfg=None):
             transforms.RandomCrop(32, padding=4),
             transforms.ToTensor(),])
     return TransformTwice(transform)
+ 
+# def build_transforms(cfg,dataset="cifar10"): 
+#     if cfg.DATASET.NAME=="cifar10":
+#         mean=(0.4914, 0.4822, 0.4465)
+#         std= (0.2471, 0.2435, 0.2616)
+#     elif cfg.DATASET.NAME=="cifar100":
+#         mean=(0.5071, 0.4867, 0.4408)
+#         std=(0.2675, 0.2565, 0.2761)    
+#     transform_train = transforms.Compose([
+#         transforms.RandomCrop(32, padding=4),
+#         transforms.RandomHorizontalFlip(),
+#         transforms.ToTensor(),
+#     ])
+
+#     transform_val = transforms.Compose([
+#         transforms.Resize(32),
+#         transforms.ToTensor(),
+#     ])
+#     return transform_train,TransformTwice(transform_train),transform_val
 
 def build_transforms(cfg: CfgNode, dataset: str) -> tuple:
     algo_name = cfg.ALGORITHM.NAME
@@ -134,6 +153,10 @@ def build_transforms(cfg: CfgNode, dataset: str) -> tuple:
         is_train=False,
         resolution=resolution
     )
+    if algo_name == "DARP_ESTIM":
+        # for darp estimation stage, unlabeled images are used for 
+        # 'evaluating' the confusion matrix
+        ul_train = eval_aug
     if algo_name == "MOOD":
         l_train=ul_train
     return l_train, ul_train, eval_aug

@@ -1,188 +1,67 @@
 import numpy as np
-import torchvision
-import os
-from typing import Tuple, List
-import random
-import math
-ood_dataset_map = {'TIN': 'Imagenet_resize'}
+def reduce_num_list(num_list,total): 
+    per=total/sum(num_list)
+    for i in range(len(num_list)):
+        num_list[i]=int(num_list[i]*per)
+    return num_list
 
-def map_dataset(dataset: torchvision.datasets, dtype: str = "float") -> dict:
-    """ dataset mapper"""
-    if dtype == "float":
-        dtype = np.float32
-    elif dtype == "uint8":
-        dtype = np.uint8
+def get_num_per_cls(n_labels_head,num_classes, imb_factor, imb_type ):
+        img_max = n_labels_head
+        img_num_per_cls = []
+        if imb_type == 'exp':
+            for cls_idx in range(num_classes):
+                num = img_max * (imb_factor**(cls_idx / (num_classes - 1.0)))
+                img_num_per_cls.append(int(num))
+        elif imb_type == 'step':
+            for cls_idx in range(num_classes // 2):
+                img_num_per_cls.append(int(img_max))
+            for cls_idx in range(num_classes // 2):
+                img_num_per_cls.append(int(img_max * imb_factor))
+        else:
+            img_num_per_cls.extend([int(img_max)] * num_classes) 
+        return img_num_per_cls 
+
+def train_val_split(labels, cfg):
+    labels = np.array(labels)
+    train_labeled_idxs = []
+    train_unlabeled_idxs = []
+    val_idxs = []
+    # 根据不平衡设定来切分数据
+    num_classes=cfg.DATASET.NUM_CLASSES
+    num_labeled_head=cfg.DATASET.DL.NUM_LABELED_HEAD
+    imb_factor_l=1./cfg.DATASET.DL.IMB_FACTOR_L 
+    num_unlabeled_head=cfg.DATASET.DU.ID.NUM_UNLABELED_HEAD 
+    imb_factor_ul=1./cfg.DATASET.DU.ID.IMB_FACTOR_UL 
+    imb_type=cfg.DATASET.IMB_TYPE
+    ood_r=cfg.DATASET.DU.OOD.RATIO if cfg.DATASET.DU.OOD.ENABLE else 0
+    total_ood_num=0
+    # DL 数据
+    l_num_per_cls_list=get_num_per_cls(num_labeled_head,num_classes,imb_factor_l,imb_type)
+    print('** DL data distribution:{}'.format(l_num_per_cls_list))
+    ul_num_per_cls_list=get_num_per_cls(num_unlabeled_head,num_classes,imb_factor_ul,imb_type)
+    total_ood_num=int(ood_r*sum(ul_num_per_cls_list))
+    if ood_r==0:pass
+    else:        
+        total_id_num=sum(ul_num_per_cls_list)-total_ood_num
+        ul_num_per_cls_list=reduce_num_list(ul_num_per_cls_list,total_id_num)
+        
+    print('** DU ID data distribution:{}'.format(ul_num_per_cls_list))
+    print('** DU OOD data num:{}'.format(total_ood_num))
+    if cfg.DATASET.NAME=='cifar10':
+        val_num=500
+    elif cfg.DATASET.NAME=='cifar100':
+        val_num=50
     else:
-        raise ValueError("dtype {} is invalid.".format(dtype))
-
-    mapped_data = dict()
-    mapped_data["images"] = dataset.data.astype(dtype)
-    if hasattr(dataset, "targets"):
-        mapped_data["labels"] = np.array(dataset.targets)
-    elif hasattr(dataset, "labels"):
-        mapped_data["labels"] = np.array(dataset.labels)
-    return mapped_data
-
-
-def split_trainval(trainval, num_valid, seed = 0,base=None) :
-    """
-        split train and validation datasets for cifar datasets.
-        randomly select class-balanced validation samples.
-    """
-    # set random state
-    rng = np.random.RandomState(seed)
-
-    trainval_images = trainval["images"]
-    trainval_labels = trainval["labels"]
-
-    num_classes = len(np.unique(trainval_labels))
-    num_valid_cls = num_valid // num_classes
-
-    train_inds = []
-    val_inds = []
+        raise "The dataset is not valid!"
     for i in range(num_classes):
-        cls_inds = np.where(trainval_labels == i)[0]
-        rng.shuffle(cls_inds)
-        train_inds.extend(cls_inds[num_valid_cls:])
-        val_inds.extend(cls_inds[:num_valid_cls])
+        idxs = np.where(labels == i)[0]
+        np.random.shuffle(idxs)
+        assert l_num_per_cls_list[i]+ul_num_per_cls_list[i]+val_num<=len(idxs)
+        train_labeled_idxs.extend(idxs[:l_num_per_cls_list[i]])
+        train_unlabeled_idxs.extend(idxs[l_num_per_cls_list[i]:l_num_per_cls_list[i]+ul_num_per_cls_list[i]])
+        val_idxs.extend(idxs[-val_num:])
+    np.random.shuffle(train_labeled_idxs)
+    np.random.shuffle(train_unlabeled_idxs)
+    np.random.shuffle(val_idxs)
 
-    train_dataset = dict(images=trainval_images[train_inds], labels=trainval_labels[train_inds])
-    val_dataset = dict(images=trainval_images[val_inds], labels=trainval_labels[val_inds])
-    return train_dataset, val_dataset
-
-
-def split_val_from_train(trainval, num_valid):
-    trainval_images = trainval["images"]
-    trainval_labels = trainval["labels"]
-
-    num_classes = len(np.unique(trainval_labels))
-    num_valid_cls = num_valid // num_classes
-
-    train_inds = []
-    val_inds = []
-    for i in range(num_classes):
-        cls_inds = np.where(trainval_labels == i)[0]
-
-        # disjoint
-        train_inds.extend(cls_inds[num_valid_cls:])
-        val_inds.extend(cls_inds[:num_valid_cls])
-
- 
-    train_dataset = dict(images=trainval_images[train_inds], labels=trainval_labels[train_inds])
-    val_dataset = dict(images=trainval_images[val_inds], labels=trainval_labels[val_inds])
-    return train_dataset, val_dataset
-
-
-def x_u_split(
-    train_dataset: np.ndarray,
-    num_l_head: int,
-    num_ul_head: int,
-    seed: int = 0,
-) -> Tuple[dict]:
-    rng = np.random.RandomState(seed)
-
-    images = train_dataset["images"]
-    labels = train_dataset["labels"]
-    num_classes = len(np.unique(labels))
-
-    labeled_inds = []
-    unlabeled_inds = []
-    for label in range(num_classes):
-        inds = np.where(labels == label)[0]
-        rng.shuffle(inds)
-        labeled_inds.extend(inds[:num_l_head])
-        unlabeled_inds.extend(inds[num_l_head:num_l_head + num_ul_head])
-
-    train_labeled = dict(images=images[labeled_inds], labels=labels[labeled_inds])
-    train_unlabeled = dict(images=images[unlabeled_inds], labels=labels[unlabeled_inds])
-    return train_labeled, train_unlabeled
-
-
-def make_imbalance(
-    dataset: np.ndarray,
-    num_head: int,
-    imb_factor: int,
-    class_inds: List[int],
-    *,
-    reverse_ul_dist: bool = False,
-    seed: int = 0,
-    is_dl=False,
-) -> Tuple[dict, List[int]]:
-    rng = np.random.RandomState(seed)
-
-    images = dataset["images"]
-    labels = dataset["labels"]
-    num_classes = len(np.unique(labels))
-    inds = []
-
-    if reverse_ul_dist:
-        class_inds.reverse()
-
-    for rank, label in enumerate(class_inds):
-        cls_inds = np.where(labels == label)[0]
-        rng.shuffle(cls_inds)
-
-        num = int(num_head * ((1. / imb_factor)**(rank / (num_classes - 1.0))))
-        if num==0 and is_dl:
-            num=1
-        inds.extend(cls_inds[:num])
-
-    imb_train = dict(images=images[inds], labels=labels[inds])
-    return imb_train, class_inds
-
-
-def get_data_config(cfg):
-    return {
-        "cifar10": cfg.DATASET.CIFAR10, 
-    }[cfg.DATASET.NAME]
-
-
-def get_imb_num(num_head, imb_factor, num_classes=10, reverse=False, normalize=False):
-    nums = []
-    classes = list(range(num_classes))  # [0, 1, ..., 9]
-    if reverse:
-        classes.reverse()
-    for rank in classes:
-        num = int(num_head * ((1. / imb_factor)**(rank / (num_classes - 1.0))))
-        nums.append(num)
-    if normalize:
-        nums = [np.round(num / min(nums), 1) for num in nums]
-    return nums
-
-
-def get_class_counts(dataset):
-    """
-        Sort the class counts by class index in an increasing order
-        i.e., List[(2, 60), (0, 30), (1, 10)] -> np.array([30, 10, 60])
-    """
-    class_count = dataset.num_samples_per_class
-
-    # sort with class indices in increasing order
-    class_count.sort(key=lambda x: x[0])
-    per_class_samples = np.asarray([float(v[1]) for v in class_count])
-    return per_class_samples
-
-
-def ood_inject(ul_train,ood_root,ood_r,ood_dataset):
-    ood_dataset=ood_dataset_map[ood_dataset]  
-    OOD = np.load(os.path.join(ood_root,ood_dataset+'.npy'))
-    total_num=len(ul_train["images"])
-    ood_num=int(total_num*ood_r)
-    assert total_num>=ood_num
-    images=ul_train["images"]
-    labels=ul_train["labels"]
-    zipped=zip(images,labels)
-    zipped=list(zipped)
-    random.shuffle(zipped)
-    random.shuffle(OOD)
-    images=[]
-    labels=[]
-    for i in range(total_num-ood_num):
-        images.append(zipped[i][0])
-        labels.append(zipped[i][1])
-     
-    images.extend(OOD[:ood_num])
-    labels=labels+[-1]*ood_num 
-    ul_train["images"]=np.array(images)
-    ul_train["labels"]=np.array(labels)
-    return ul_train
+    return train_labeled_idxs, train_unlabeled_idxs, val_idxs,l_num_per_cls_list,total_ood_num

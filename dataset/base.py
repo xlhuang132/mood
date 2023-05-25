@@ -86,6 +86,17 @@ class BaseNumpyDataset(Dataset):
     def _load_num_samples_per_class(self):
         labels = self.dataset[self.label_key]
         classes = range(-1,self.num_classes)
+
+        # classwise_num_samples = dict()
+        # for i in classes:
+        #     if i==-1:
+        #         self.ood_num=len(np.where(labels == i)[0])
+        #         continue
+        #     classwise_num_samples[i] = len(np.where(labels == i)[0])
+
+        # # in a descending order of classwise count. [(class_idx, count), ...]
+        # res = sorted(classwise_num_samples.items(), key=(lambda x: x[1]), reverse=True)
+        # return res
         classwise_num_samples = [0]*(len(classes)-1)
         for i in classes:
             if i==-1:
@@ -105,6 +116,7 @@ class BaseNumpyDataset(Dataset):
     def soft_label_update(self,results):
         self.count += 1
 
+        # While updating the noisy label y_i by the probability s, we used the average output probability of the network of the past 10 epochs as s.
         idx = (self.count - 1) % 10
         self.prediction[self.labeled_data_num:, idx] = results[self.labeled_data_num:]
 
@@ -130,6 +142,7 @@ class BaseNumpyDataset(Dataset):
         class_weight = [max_num / i for i in num_list]
         sum_weight = sum(class_weight)
         return class_weight, sum_weight
+
 
     def select_dataset(self, indices=None, labels=None, return_transforms=False):
         if indices is None:
