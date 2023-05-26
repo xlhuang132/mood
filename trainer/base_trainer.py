@@ -309,32 +309,32 @@ class BaseTrainer():
         self.labeled_train_iter=iter(self.labeled_trainloader)
         return   
     
-    def train_warmup_step_by_dl_contra(self):
-        self.model.train()
-        loss =0
-        # DL  
-        try:
-            (inputs_x,inputs_x2), targets,_ = self.pre_train_iter.next()  
-        except:            
-            self.pre_train_iter=iter(self.pre_train_loader)            
-            (inputs_x,inputs_x2),targets,_ = self.pre_train_iter.next()  
+    # def train_warmup_step_by_dl_contra(self):
+    #     self.model.train()
+    #     loss =0
+    #     # DL  
+    #     try:
+    #         (inputs_x,inputs_x2), targets,_ = self.pre_train_iter.next()  
+    #     except:            
+    #         self.pre_train_iter=iter(self.pre_train_loader)            
+    #         (inputs_x,inputs_x2),targets,_ = self.pre_train_iter.next()  
             
-        inputs_x = torch.cat([inputs_x,inputs_x2],dim=0).cuda() #inputs_x.cuda(), inputs_x2.cuda()    
-        out_1 = self.model(inputs_x,return_encoding=True) 
-        out = self.model(out_1,return_projected_feature=True)
-        loss=self.warmup_loss(features)
-        self.optimizer.zero_grad()
-        loss.backward()
-        self.optimizer.step()
-        self.losses.update(loss.item(),inputs_x.size(0))
+    #     inputs_x = torch.cat([inputs_x,inputs_x2],dim=0).cuda() #inputs_x.cuda(), inputs_x2.cuda()    
+    #     out_1 = self.model(inputs_x,return_encoding=True) 
+    #     out = self.model(out_1,return_projected_feature=True)
+    #     loss=self.warmup_loss(features)
+    #     self.optimizer.zero_grad()
+    #     loss.backward()
+    #     self.optimizer.step()
+    #     self.losses.update(loss.item(),inputs_x.size(0))
         
-        if self.ema_enable:
-            current_lr = self.optimizer.param_groups[0]["lr"]
-            ema_decay =self.ema_model.update(self.model, step=self.iter, current_lr=current_lr)
-        if self.iter % self.cfg.SHOW_STEP==0:
-            self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='\
-                .format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses.val,self.losses_x.avg,self.losses_u.val))
-        return 
+    #     if self.ema_enable:
+    #         current_lr = self.optimizer.param_groups[0]["lr"]
+    #         ema_decay =self.ema_model.update(self.model, step=self.iter, current_lr=current_lr)
+    #     if self.iter % self.cfg.SHOW_STEP==0:
+    #         self.logger.info('== Epoch:{} Step:[{}|{}] Total_Avg_loss:{:>5.4f} Avg_Loss_x:{:>5.4f}  Avg_Loss_u:{:>5.4f} =='\
+    #             .format(self.epoch,self.iter%self.train_per_step if self.iter%self.train_per_step>0 else self.train_per_step,self.train_per_step,self.losses.val,self.losses_x.avg,self.losses_u.val))
+    #     return 
     
     def train_warmup_step(self): #
         self.model.train() 

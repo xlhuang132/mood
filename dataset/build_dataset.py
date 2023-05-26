@@ -3,10 +3,8 @@ from .cifar100 import *
 from .svhn import get_svhn
 from .stl10 import get_stl10
 from .build_transform import *
-from dataset.ood_dataset_map import ood_dataset_map
-from dataset.ood_dataset import OOD_Dataset
-from .imagenet import get_imagenet_ssl_dataset
-from .mydataset import MyDataset
+from dataset.ood_dataset_map import ood_dataset_map 
+from .imagenet import get_imagenet_ssl_dataset 
 import os
 
 def build_test_dataset(cfg):
@@ -65,18 +63,7 @@ def build_dataset(cfg,logger=None,test_mode=False):
         logger.info("== 3. Total number of test data:{}".format(test_dataset.total_num))         
         logger.info("== Test class distribution of labeled dataset:{}".format(test_dataset.num_per_cls_list)) 
         return train_labeled_dataset,train_unlabeled_dataset,test_dataset
-        
-        # transform_labeled = ListTransform(cfg.SEMI_INAT.LPIPELINES)
-        # transform_ulabeled = ListTransform(cfg.SEMI_INAT.UPIPELINES)
-        # transform_val = BaseTransform(cfg.SEMI_INAT.VPIPELINE )
-        # return get_imagenet_ssl_dataset(root=dataset_root, 
-        #                                 anno_file=dataset_root,
-        #                                 percent=cfg.SEMI_INAT.PERCENT,
-        #                                 transform_labeled=transform_labeled,
-        #                                 transform_ulabeled=transform_ulabeled,
-        #                                 transform_val=transform_val,
-        #                                 cfg=cfg)
-    
+     
     
     assert cfg.DATASET.DU.OOD.DATASET in ood_dataset_map.keys()
     

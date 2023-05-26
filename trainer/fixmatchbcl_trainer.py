@@ -58,15 +58,15 @@ class FixMatchBCLTrainer(BaseTrainer):
         
         # fixmatch pipelines
         logits_concat = self.model(x)
-        num_labels=inputs_x.size(0)
-        logits_x = logits_concat[:num_labels]
+        batch_size=inputs_x.size(0)
+        logits_x = logits_concat[:batch_size]
 
         # loss computation 
         lx=self.l_criterion(logits_x, targets_x.long()) 
         # compute 1st branch accuracy
         score_result = self.func(logits_x)
         now_result = torch.argmax(score_result, 1)         
-        logits_weak, logits_strong = logits_concat[num_labels:].chunk(2)
+        logits_weak, logits_strong = logits_concat[batch_size:].chunk(2)
         with torch.no_grad():
             # compute pseudo-label
             p = logits_weak.softmax(dim=1)  # soft pseudo labels

@@ -1,5 +1,5 @@
 
-from .transforms import *
+# from .transforms import *
 import torchvision
 from .transform.rand_augment import RandAugment
 from .transform.transforms import TransformFixMatch,TransformOpenMatch
