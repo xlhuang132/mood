@@ -4,6 +4,7 @@ import os
 from typing import Tuple, List
 import random
 import math
+from .ood_dataset_map import *
 
 def map_dataset(dataset: torchvision.datasets, dtype: str = "float") -> dict:
     """CIFAR-10/100, STL dataset mapper"""
