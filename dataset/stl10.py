@@ -6,7 +6,7 @@ import numpy as np
 from .base import BaseNumpyDataset
 from .build_transform import  build_simclr_transform
 from .transform import build_transforms
-from .utils_ import make_imbalance, map_dataset, split_trainval, split_val_from_train, x_u_split,ood_inject
+from .utils import make_imbalance, map_dataset, split_trainval, split_val_from_train, x_u_split,ood_inject
 
 def get_stl10(root, out_dataset, start_label=0,ood_ratio=0, 
                  transform_train=None, transform_val=None,test_mode=False,
