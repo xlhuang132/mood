@@ -2,7 +2,7 @@ from collections import defaultdict
 import torch
 
 import torch.distributed as dist
-import diffdist.functional as distops 
+# import diffdist.functional as distops 
 
 
 class FeatureQueue:

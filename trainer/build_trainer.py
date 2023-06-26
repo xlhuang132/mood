@@ -14,6 +14,7 @@ from .fixmatchbcl_trainer import FixMatchBCLTrainer
 from .ood_detector_trainer import OODDetectorTrainer
 from .abc_trainer import ABCTrainer
 from .cossl_trainer import CoSSLTrainer
+from .openmix_trainer import OpenMixTrainer
 
 def build_trainer(cfg):
     alg=cfg.ALGORITHM.NAME
@@ -45,5 +46,7 @@ def build_trainer(cfg):
         return ABCTrainer(cfg)
     elif alg=='CoSSL':
         return CoSSLTrainer(cfg)
+    elif alg=='openmix':
+        return OpenMixTrainer(cfg)
     else:
         raise "The algorithm type is not valid!"

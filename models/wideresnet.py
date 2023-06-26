@@ -81,7 +81,23 @@ class WideResNet(nn.Module):
         for name, p in self.named_parameters(): 
             if 'fc' not in name:
                 p.requires_grad = False
-        
+    
+    def unfroze_backbone(self,):
+        for name, p in self.named_parameters(): 
+            if 'fc' not in name:
+                p.requires_grad = True
+
+    def froze_classifier(self,):
+        for name, p in self.named_parameters(): 
+            if 'fc' in name:
+                p.requires_grad = False
+    
+    def unfroze_classifier(self,):
+        for name, p in self.named_parameters(): 
+            if 'fc' in name:
+                p.requires_grad = True
+
+
     def reset_classifier(self,):
         self.fc = Classifier(self.encoder.out_features, self.encoder.num_classes).cuda()
     

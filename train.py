@@ -28,7 +28,6 @@ def parse_args():
     args = parser.parse_args()
     return args 
 
-
 # seed=random.randint(1,1000)
 seed=7
 os.environ['PYTHONHASHSEED'] = str(seed)
@@ -58,6 +57,6 @@ for if_ in IF:  # if
         trainer.train()
         print("*************{} IF {}  R {} end *************".format(cfg.DATASET.NAME,if_,r))
         
+            
         
-    
    
